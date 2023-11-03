@@ -1,0 +1,44 @@
+{
+  "name": "mercury-engine",
+  "version": "1.0.0",
+  "description": "The mercury engine generates web audio output from mercury code input",
+  "main": "./dist/mercury.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "clean": "rm -rf dist",
+    "watch": "watchify -t brfs src/mercury.js --standalone MercuryEngine -o dist/mercury.js -v | terser dist/mercury.js -o dist/mercury.min.js -c -m --comments 'false'",
+    "dist": "mkdir dist && browserify -t brfs src/mercury.js | uglifyjs > dist/mercury.js",
+    "build": "npm run clean && npm run dist"
+  },
+  "keywords": [
+    "mercury",
+    "live",
+    "coding",
+    "creative",
+    "coding",
+    "algorithmic",
+    "composition",
+    "electronic",
+    "music",
+    "audiovisual",
+    "web",
+    "audio",
+    "embedded",
+    "sound",
+    "generative",
+    "art"
+  ],
+  "author": "Timo Hoogland",
+  "license": "ISC",
+  "dependencies": {
+    "mercury-lang": "^1.9.3",
+    "tone": "^14.7.77",
+    "webmidi": "^3.1.6"
+  },
+  "devDependencies": {
+    "brfs": "^2.0.2",
+    "browserify": "^17.0.0",
+    "terser": "^5.24.0",
+    "watchify": "^4.0.0"
+  }
+}
