@@ -2,7 +2,7 @@
   "name": "mercury-engine",
   "version": "1.0.0",
   "description": "The mercury engine generates web audio output from mercury code input",
-  "main": "./dist/mercury.js",
+  "main": "./dist/mercury.min.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "clean": "rm -rf dist",

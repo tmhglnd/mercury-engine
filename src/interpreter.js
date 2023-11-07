@@ -21,6 +21,9 @@ class MercuryInterpreter {
 		this._sounds = [];
 		this.sounds = [];
 
+		// storage of latest evaluated code
+		this._code = '';
+
 		// parsetree storage
 		this.parse;
 		this.tree;
@@ -61,10 +64,11 @@ class MercuryInterpreter {
 		s.length = 0;
 	}
 
-	code({ file, canvas, p5canvas }){
+	code({ file='', canvas, p5canvas } = {}){
 		// parse and evaluate the inputted code
 		// as an asyncronous function with promise
-		let c = file;
+		let c = (!file)? this._code : file;
+		this._code = c;
 
 		let t = Tone.Transport.seconds;
 		// is this necessary?
