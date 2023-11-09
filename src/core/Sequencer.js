@@ -84,7 +84,10 @@ class Sequencer {
 	
 				// execute a visual event for Hydra
 				if (this._visual.length > 0){
-					this._canvas.eval(Util.getParam(this._visual, c));
+					// only evaluate if an instance of Hydra is included
+					if (this._canvas){
+						this._canvas.eval(Util.getParam(this._visual, c));
+					}
 				}
 	
 				// increment internal beat counter

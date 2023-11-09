@@ -1,5 +1,12 @@
 
-console.log('Mercury Engine Package Included');
+console.log(`
+Mercury Engine by Timo Hoogland (c) 2023
+	more info:
+	https://www.timohoogland.com
+	https://mercury.timohoogland.com
+	https://github.com/tmhglnd/mercury
+
+`);
 
 const Tone = require('tone');
 const { MercuryInterpreter } = require('./interpreter');
@@ -52,12 +59,12 @@ class Mercury extends MercuryInterpreter {
 
 			if (Tone.Transport.state !== 'started'){
 				Tone.Transport.timeSignature = [4, 4];
-				// a bit latency for safety
+				// a bit latency on start for safety
 				Tone.Transport.start('+0.1');
-				console.log('Resumed Tone Transport');
+				console.log('Resumed Transport');
 			}
 		} catch {
-			console.error('Error starting ToneJS');
+			console.error('Error starting Transport');
 		}
 	}
 
@@ -68,7 +75,7 @@ class Mercury extends MercuryInterpreter {
 			this.removeSounds(this.sounds, 0.1);
 			// Stops instead of pause so restarts at 0
 			Tone.Transport.stop();
-			console.log('Stopped Tone Transport');
+			console.log('Stopped Transport');
 		} catch {
 			console.error('Error stopping Transport');
 		}
@@ -119,7 +126,6 @@ class Mercury extends MercuryInterpreter {
 				this.addBufferFromURL(url, n);
 			}
 		});
-		console.log('Done loading all sounds!');
 	}
 
 	// add a single file to the buffer from URL
