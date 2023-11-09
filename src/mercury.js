@@ -96,9 +96,8 @@ class Mercury extends MercuryInterpreter {
 
 	// add files to the buffer from a single File Link
 	// an array or file paths, or a json of { name:file, ... }
-	async addBuffers(uploads){
+	async addSamples(uploads){
 		// for every file from uploads
-		let promises = [];
 		uploads.forEach((f) => {
 			let n = f;
 			let url = f;
@@ -215,18 +214,22 @@ class Mercury extends MercuryInterpreter {
 	// default starts recording, a false/0 stops recording
 	// optionally add a filename to the downloading file
 	async record(start=true, file='recoring'){
-		if (start){
-			// star the recording
-			this.recorder.start();
-		} else {
-			// stop the recording and return blob
-			const recording = await this.recorder.stop();
-			const url = URL.createObjectURL(recording);
-			// download via anchor element
-			const anchor = document.createElement('a');
-			anchor.download = `${file}.webm`;
-			anchor.href = url;
-			anchor.click();
+		try {
+			if (start){
+				// star the recording
+				this.recorder.start();
+			} else {
+				// stop the recording and return blob
+				const recording = await this.recorder.stop();
+				const url = URL.createObjectURL(recording);
+				// download via anchor element
+				const anchor = document.createElement('a');
+				anchor.download = `${file}.webm`;
+				anchor.href = url;
+				anchor.click();
+			}
+		} catch(e) {
+			console.log(`Error starting/stopping recording ${e}`);
 		}
 	}
 
