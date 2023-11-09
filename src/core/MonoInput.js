@@ -10,7 +10,7 @@ class MonoInput extends Instrument {
 		} else if (d.match(/in(\d+)/g)){
 			this._device = Number(d.match(/in(\d+)/)[1]);
 		} else {
-			log(`${d} is not a valid microphone input. defaults to in0`);
+			console.log(`${d} is not a valid microphone input. defaults to in0`);
 			this._device = 0;
 		}
 
@@ -23,9 +23,9 @@ class MonoInput extends Instrument {
 	createSource(){
 		this.mic = new Tone.UserMedia().connect(this.channelStrip());
 		this.mic.open(this._device).then(() => {
-			log(`Opened microphone: ${window.devices[this._device]}`);
+			console.log(`Opened microphone: ${window.devices[this._device]}`);
 		}).catch((e) => {
-			log(`Unable to use microphone`);
+			console.log(`Unable to use microphone`);
 		});
 		this.mic.channelInterpretation = 'discrete';
 		

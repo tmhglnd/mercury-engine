@@ -12,7 +12,7 @@ class MonoMidi extends Sequencer {
 		if (d === 'default'){
 			this._device = WebMidi.outputs[0];
 		} else if (!this._device){
-			log(`${d} is not a valid MIDI Device name, set to default`);
+			console.log(`${d} is not a valid MIDI Device name, set to default`);
 			this._device = WebMidi.outputs[0];
 		}
 
@@ -119,7 +119,7 @@ class MonoMidi extends Sequencer {
 		this._cc = [];
 		cc.forEach((c) => {
 			if (isNaN(c[0])){
-				log(`'${c[0]}' is not a valid CC number`);
+				console.log(`'${c[0]}' is not a valid CC number`);
 			} else {
 				let cc = [];
 				cc[0] = c[0];

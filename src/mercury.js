@@ -14,19 +14,15 @@ Tone.getContext().addAudioWorkletModule(URL.createObjectURL(new Blob([ fxExtensi
 // also has the interpreter evaluating the code and adding the instruments
 // 
 class Mercury extends MercuryInterpreter {
-	constructor(){
+	constructor(callback){
+		// initalize the constructor of inheriting class
 		super();
 		// store sample files in buffers
 		this.samples = require('./data/samples.json');
-		console.log(this.samples);
 
-		this.buffers = new Tone.ToneAudioBuffers({
-			urls: this.samples,
-			baseUrl: "https://raw.githubusercontent.com/tmhglnd/mercury-playground/main/public/assets/samples/",
-			onload: () => {
-				console.log('Loaded samples');
-			}
-		});
+		// this.buffers = new Tone.ToneAudioBuffers();
+		// add the buffers via function
+		// this.addBuffers(['http://localhost:8080/mercury-engine/src/data/samples.json'])
 
 		// effects on main output for Tone
 		this.gain = new Tone.Gain(1);
@@ -37,6 +33,16 @@ class Mercury extends MercuryInterpreter {
 		// a recorder for the sound
 		this.recorder = new Tone.Recorder({ mimeType: 'audio/webm' });
 		this.gain.connect(this.recorder);
+
+		this.buffers = new Tone.ToneAudioBuffers({
+			urls: this.samples,
+			baseUrl: "https://raw.githubusercontent.com/tmhglnd/mercury-playground/main/public/assets/samples/",
+			onload: () => {
+				console.log('Samples loaded', this.buffers);
+				// executes a callback from the class constructor
+				if (callback){ callback(); }
+			}
+		});
 	}
 
 	// resume webaudio and transport
@@ -90,8 +96,9 @@ class Mercury extends MercuryInterpreter {
 
 	// add files to the buffer from a single File Link
 	// an array or file paths, or a json of { name:file, ... }
-	addBuffers(uploads){
+	async addBuffers(uploads){
 		// for every file from uploads
+		let promises = [];
 		uploads.forEach((f) => {
 			let n = f;
 			let url = f;
@@ -107,12 +114,13 @@ class Mercury extends MercuryInterpreter {
 			}
 			if (n.endsWith('.json')){
 				// read from json if loaded is a json file
-				addBufferFromJson(url);
+				this.addBufferFromJson(url);
 			} else {
 				// otherwise read the soundfile regularly
-				addBufferFromURL(url, n);
+				this.addBufferFromURL(url, n);
 			}
 		});
+		console.log('Done loading all sounds!');
 	}
 
 	// add a single file to the buffer from URL
@@ -130,7 +138,7 @@ class Mercury extends MercuryInterpreter {
 		n = n.trim().replace(/[\s]+/g, '_');
 
 		// add to ToneAudioBuffers
-		buffers.add(n, url, () => {
+		this.buffers.add(n, url, () => {
 			console.log(`sound added as: ${n}`);
 			URL.revokeObjectURL(url);
 
@@ -159,14 +167,14 @@ class Mercury extends MercuryInterpreter {
 					// when array is used increment the filename with _x
 					let u = (base)? base + i : i;
 					let n = (idx > 0)? f + '_' + idx : f;
-					addBufferFromURL(u, n);
+					this.addBufferFromURL(u, n);
 					idx++;
 				});
 			} else {
 				if (base){
 					files[f] = base + files[f];
 				}
-				addBufferFromURL(files[f], f);
+				this.addBufferFromURL(files[f], f);
 			}
 		});
 	}
@@ -204,8 +212,10 @@ class Mercury extends MercuryInterpreter {
 	}
 
 	// a recording function
-	async record(on, file){
-		if (on){
+	// default starts recording, a false/0 stops recording
+	// optionally add a filename to the downloading file
+	async record(start=true, file='recoring'){
+		if (start){
 			// star the recording
 			this.recorder.start();
 		} else {
@@ -214,7 +224,7 @@ class Mercury extends MercuryInterpreter {
 			const url = URL.createObjectURL(recording);
 			// download via anchor element
 			const anchor = document.createElement('a');
-			anchor.download = `${f}.webm`;
+			anchor.download = `${file}.webm`;
 			anchor.href = url;
 			anchor.click();
 		}

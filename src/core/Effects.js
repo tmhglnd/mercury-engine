@@ -436,7 +436,7 @@ const TriggerFilter = function(_params){
 	if (this._types[_params[0][0]]){
 		this._fx.set({ type: this._types[_params[0][0]] });
 	} else {
-		log(`'${_params[0][0]}' is not a valid filter type. Defaulting to lowpass`);
+		console.log(`'${_params[0][0]}' is not a valid filter type. Defaulting to lowpass`);
 		this._fx.set({ type: 'lowpass' });
 	}
 

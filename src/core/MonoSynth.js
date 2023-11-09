@@ -57,7 +57,7 @@ class MonoSynth extends Instrument {
 		if (this._waveMap[w]){
 			w = this._waveMap[w];
 		} else {
-			log(`${w} is not a valid waveshape`);
+			console.log(`${w} is not a valid waveshape`);
 			// default wave if wave does not exist
 			w = 'sine';
 		}

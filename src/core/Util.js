@@ -37,8 +37,8 @@ function isRandom(a, l=0, h=1){
 function getParam(a, i){
 	// also check if value is an osc-address, then use last received value
 	// return randLookup(getOSC(lookup(a, i)));
-	// return evalExpr(randLookup(lookup(getOSC(a), i)));
-	return randLookup(lookup(getOSC(a), i));
+	return evalExpr(randLookup(lookup(getOSC(a), i)));
+	// return randLookup(lookup(getOSC(a), i));
 }
 
 // retrieve received messages via osc as arguments or pass through
@@ -83,7 +83,7 @@ function evalExpr(a){
 		try {
 			result = eval(expr);
 		} catch (e){
-			log(`Unable to evaluate expression: ${expr}`);
+			console.log(`Unable to evaluate expression: ${expr}`);
 		}
 		return result;
 	}
@@ -131,7 +131,7 @@ function noteToFreq(i, o){
 	if (isNaN(i)){
 		let _i = noteToMidi(i);
 		if (!_i){
-			log(`${i} is not a valid number or name`);
+			console.log(`${i} is not a valid number or name`);
 			i = 0;
 		} else {
 			i = _i - 48;
@@ -162,7 +162,7 @@ function assureWave(w){
 	if (waveMap[w]){
 		w = waveMap[w];
 	} else {
-		log(`${w} is not a valid waveshape`);
+		console.log(`${w} is not a valid waveshape`);
 		// default wave if wave does not exist
 		w = 'sine';
 	}
@@ -174,7 +174,7 @@ function toMidi(n=0, o=0){
 	if (isNaN(n)){
 		let _n = noteToMidi(n);
 		if (!_n){
-			log(`${n} is not a valid number or name`);
+			console.log(`${n} is not a valid number or name`);
 			n = 0;
 		} else {
 			n = _n - 36;
