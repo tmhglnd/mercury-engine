@@ -104,6 +104,13 @@ Engine.setVolume(0.5);
 Engine.addSamples();
 ```
 
+## 📋 To Do
+
+- [ ] Include OSC communcation options via socket.io
+- [ ] Use engine in the Mercury-playground instead of the other code-base
+- [ ] Create examples for the engine
+- [ ] Allow control of parameters via DOM elements
+
 ## 🔋 Powered By
 
 - Mercury was granted funding from [**Creative Industries Fund NL**](https://stimuleringsfonds.nl/en/)
