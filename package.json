@@ -8,8 +8,9 @@
     "clean": "rm -rf dist",
     "watch": "watchify -t brfs src/mercury.js --standalone MercuryEngine -o dist/mercury.js -v | terser dist/mercury.js -o dist/mercury.min.js -c -m --comments 'false'",
     "dist": "mkdir dist && browserify -t brfs src/mercury.js --standalone MercuryEngine -o dist/mercury.js",
-    "uglify" : "terser dist/mercury.js -o dist/mercury.min.js -c -m --comments 'false'",
-    "build": "npm run clean && npm run dist && npm run uglify"
+    "uglify": "terser dist/mercury.js -o dist/mercury.min.js -c -m --comments 'false'",
+    "es5": "babel dist/mercury.min.js -o dist/mercury.min.es5.js",
+    "build": "npm run clean && npm run dist && npm run uglify && npm run es5"
   },
   "keywords": [
     "mercury",
@@ -37,6 +38,9 @@
     "webmidi": "^3.1.6"
   },
   "devDependencies": {
+    "@babel/cli": "^7.23.0",
+    "@babel/core": "^7.23.3",
+    "@babel/preset-env": "^7.23.3",
     "brfs": "^2.0.2",
     "browserify": "^17.0.0",
     "terser": "^5.24.0",
