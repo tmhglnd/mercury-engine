@@ -1,3 +1,5 @@
+⚠️ **WORK IN PROGRESS, EXPERIMENTAL USE ONLY** ⚠️
+
 # 🌕 Mercury Engine
 
 **The engine (core) of the Mercury Live Coding Environment for the browser**
