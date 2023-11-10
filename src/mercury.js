@@ -17,6 +17,8 @@ const fs = require('fs');
 const fxExtensions = fs.readFileSync('./src/core/effects/Processors.js', 'utf-8');
 Tone.getContext().addAudioWorkletModule(URL.createObjectURL(new Blob([ fxExtensions ], { type: 'text/javascript' })));
 
+// const minifyInline = require('minify-inline-json');
+
 // Mercury main class controls Tone and loads samples
 // also has the interpreter evaluating the code and adding the instruments
 // 
@@ -25,7 +27,7 @@ class Mercury extends MercuryInterpreter {
 		// initalize the constructor of inheriting class
 		super();
 		// store sample files in buffers
-		this.samples = require('./data/samples.json');
+		this.samples = JSON.parse(fs.readFileSync('./src/data/samples.json', 'utf-8'));
 
 		// this.buffers = new Tone.ToneAudioBuffers();
 		// add the buffers via function
