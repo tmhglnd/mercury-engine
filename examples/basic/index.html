@@ -4,25 +4,48 @@
 <head>
 	<title>Mercury Engine Example</title>
 
-	<script src="https://unpkg.com/mercury-engine@1.0.0/dist/mercury.min.es5.js
-	"></script>
+	<!-- <script src="https://unpkg.com/mercury-engine@1.0.1/dist/mercury.min.es5.js"></script> -->
+	<script src="./../../dist/mercury.js"></script>
+
 </head>
 
 <body>
+	<p style="font-family: 'arial';">
+		The Mercury Engine is running on an html page through a script src include from unpkg.com. Open the Javascript Console to see some information logged about the engine while it's running. For documentation go to <a target="blank" href="https://github.com/tmhglnd/mercury-engine#usage">github.com/tmhglnd/mercury-engine</a>
+	</p>
+
+	<!-- 2 buttons in the html page -->
 	<button id="b1">start</button>
 	<button id="b2">silence</button>
 
 	<script>
 		// This script loads the Mercury Engine and allows to insert code
 		// from a textarea in the html page
-		
+
 		// Include the package from unpkg.com
 		const { Mercury } = MercuryEngine;
+		// const { OSC } = MercuryEngine;
+		// const { MIDI } = MercuryEngine;
 
 		// Initialize a Mercury engine with callback function when loaded
-		const Engine = new Mercury( () => {
-			console.log('The engine and sounds are loaded!');
+		const Engine = new Mercury({
+			onload: () => {
+				console.log('The engine and sounds are loaded!');
+
+				// set the volume to 0.7, about -3dBFS
+				Engine.setVolume(0.7);
+				// generate a random BPM
+				Engine.randomBPM();
+				// set the crossfade from previous and new evaluated code to 250 ms
+				Engine.setCrossFade(1000);
+
+				console.log('BPM:', Engine.bpm);
+				console.log('Volume:', Engine.volume);
+				console.log('CrossFade:', Engine.crossFade);
+			}
 		});
+
+		// console.log(this.getBPM());
 
 		// Some mercury code initially created
 		const simpleCode = `
@@ -46,12 +69,12 @@
 
 		// evaluate the code on the click of a button
 		let b1 = document.getElementById('b1');
-		b1.onclick = () => Engine.code({ file: simpleCode });
+		b1.onclick = () => Engine.code(simpleCode);
 
 		// stop the code on the click of a button
 		let b2 = document.getElementById('b2');
 		b2.onclick = () => Engine.silence();
-
 	</script>
 </body>
+
 </html>

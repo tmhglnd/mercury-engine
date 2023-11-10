@@ -71,14 +71,14 @@ const Engine = Mercury(() => {
 // to play from the browser window
 Engine.resume()
 
-// Evaluate a mercury code file by providing an object with {file:<code>}
+// Evaluate a mercury code file by providing a string of code
 // This also resumes the transport if .resume() was not called yet
-Engine.code({ file: `
+Engine.code(`
 	set tempo 100
 	new sample kick_909 time(1/4)
 	new sample hat_909 time(1/4 1/8) gain(0.6)
 	new synth saw note(0 0) time(1/16) shape(1 80)
-`});
+`);
 
 // stop the transport and silence the audio
 Engine.silence();

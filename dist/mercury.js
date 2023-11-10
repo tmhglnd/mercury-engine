@@ -17120,7 +17120,7 @@ module.exports={
 const Tone = require('tone');
 const Mercury = require('mercury-lang');
 const TL = require('total-serialism').Translate;
-// const Util = require('total-serialism').Utility;
+const Util = require('total-serialism').Utility;
 
 const MonoSample = require('./core/MonoSample.js');
 const MonoMidi = require('./core/MonoMidi.js');
@@ -17131,7 +17131,7 @@ const PolySample = require('./core/PolySample.js');
 const Tempos = require('./data/genre-tempos.json');
 
 class MercuryInterpreter {
-	constructor(){
+	constructor({ hydra, p5canvas } = {}){
 		// cross-fade time
 		this.crossFade = 0.5;
 		
@@ -17146,6 +17146,10 @@ class MercuryInterpreter {
 		this.parse;
 		this.tree;
 		this.errors;
+
+		// Hydra and P5 canvas
+		this.canvas = hydra;
+		this.p5canvas = p5canvas;
 	}
 
 	getSounds(){
@@ -17182,19 +17186,27 @@ class MercuryInterpreter {
 		s.length = 0;
 	}
 
-	code({ file='', canvas, p5canvas } = {}){
+	setCrossFade(f){
+		// set the crossFade in milliseconds
+		this.crossFade = Number(f) / 1000;
+		// log(`Crossfade: ${f}ms`);
+	}
+
+	code(file=''){
 		// parse and evaluate the inputted code
 		// as an asyncronous function with promise
 		let c = (!file)? this._code : file;
 		this._code = c;
 
 		let t = Tone.Transport.seconds;
+		
 		// is this necessary?
 		// let parser = new Promise((resolve) => {
 		// 	return resolve(Mercury(c));
 		// });
 		// this.parse = await parser;
 		this.parse = Mercury(c);
+		
 		console.log(`Evaluated code in: ${((Tone.Transport.seconds-t) * 1000).toFixed(3)}ms`);
 
 		this.tree = this.parse.parseTree;
@@ -17218,17 +17230,6 @@ class MercuryInterpreter {
 			console.log(p);
 		});
 
-		// hide canvas and noLoop
-		// p5canvas.hide();
-
-		// handle .display to p5
-		// tree.display.forEach((p) => {
-		// 	// restart canvas if view is used
-		// 	let n = Util.mul(Util.normalize(p), 255);
-		// 	p5canvas.sketch.fillCanvas(n);
-		// 	p5canvas.display();
-		// });
-
 		// set timer to check evaluation time
 		t = Tone.Transport.seconds;
 
@@ -17236,9 +17237,7 @@ class MercuryInterpreter {
 		const globalMap = {
 			'crossFade' : (args) => {
 				// set crossFade time in ms
-				this.crossFade = Number(args[0]) / 1000;
-				// log(`crossfade time is ${args[0]}ms`);
-				console.log(`Crossfade: ${args[0]}ms`);
+				this.setCrossFade(args[0]);
 			},
 			'tempo' : (args) => {
 				let t = args[0];
@@ -17250,7 +17249,7 @@ class MercuryInterpreter {
 					}
 					args[0] = t;
 				}
-				this.bpm(...args);
+				this.setBPM(...args);
 				// engine.setBPM(...args);
 				// log(`set bpm to ${bpm}`);
 			}, 
@@ -17303,38 +17302,38 @@ class MercuryInterpreter {
 		// Handling all the different instrument types here
 		const objectMap = {
 			'sample' : (obj) => {		
-				let inst = new MonoSample(this, obj.type, canvas);
+				let inst = new MonoSample(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
 			'loop' : (obj) => {		
-				let inst = new MonoSample(this, obj.type, canvas);
+				let inst = new MonoSample(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
 			'synth' : (obj) => {		
 				console.log(obj);
-				let inst = new MonoSynth(this, obj.type, canvas);
+				let inst = new MonoSynth(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
 			'polySynth' : (obj) => {
-				let inst = new PolySynth(this, obj.type, canvas);
+				let inst = new PolySynth(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
 			'polySample' : (obj) => {
-				let inst = new PolySample(this, obj.type, canvas);
+				let inst = new PolySample(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
 			'midi' : (obj) => {
-				let inst = new MonoMidi(this, obj.type, canvas);
+				let inst = new MonoMidi(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
 			'input' : (obj) => {
-				let inst = new MonoInput(this, obj.type, canvas);
+				let inst = new MonoInput(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
@@ -17390,6 +17389,20 @@ class MercuryInterpreter {
 		this.removeSounds(this._sounds, this.crossFade);
 
 		this.resume();
+
+		// if p5js canvas is included in the html page
+		if (this.p5canvas){ 
+			// hide canvas and noLoop			
+			this.p5canvas.hide(); 
+		
+			// handle .display to p5
+			tree.display.forEach((p) => {
+				// restart canvas if view is used
+				let n = Util.mul(Util.normalize(p), 255);
+				this.p5canvas.sketch.fillCanvas(n);
+				this.p5canvas.display();
+			});
+		}
 	}
 }
 module.exports = { MercuryInterpreter }
@@ -17400,7 +17413,8 @@ Mercury Engine by Timo Hoogland (c) 2023
 	more info:
 	https://www.timohoogland.com
 	https://mercury.timohoogland.com
-	https://github.com/tmhglnd/mercury
+	https://github.com/tmhglnd/mercury-playground
+	https://github.com/tmhglnd/mercury-engine
 
 `);
 
@@ -17413,21 +17427,25 @@ const { MercuryInterpreter } = require('./interpreter');
 const fxExtensions = "\n// A white noise generator at -6dBFS to test AudioWorkletProcessor\n//\nclass NoiseProcessor extends AudioWorkletProcessor {\n\tprocess(inputs, outputs, parameters){\n\t\tconst output = outputs[0];\n\n\t\toutput.forEach((channel) => {\n\t\t\tfor (let i=0; i<channel.length; i++) {\n\t\t\t\tchannel[i] = Math.random() - 0.5;\n\t\t\t}\n\t\t});\n\t\treturn true;\n\t}\n}\nregisterProcessor('noise-processor', NoiseProcessor);\n\n// A Downsampling Chiptune effect. Downsamples the signal by a specified amount\n// Resulting in a lower samplerate, making it sound more like 8bit/chiptune\n// Programmed with a custom AudioWorkletProcessor, see effects/Processors.js\n//\nclass DownSampleProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [{\n\t\t\tname: 'down',\n\t\t\tdefaultValue: 8,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 2048\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t\t// the frame counter\n\t\tthis.count = 0;\n\t\t// sample and hold variable array\n\t\tthis.sah = [];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\t// if there is anything to process\n\t\tif (input.length > 0){\n\t\t\t// for the length of the sample array (generally 128)\n\t\t\tfor (let i=0; i<input[0].length; i++){\n\t\t\t\tconst d = (parameters.down.length > 1) ? parameters.down[i] : parameters.down[0];\n\t\t\t\t// for every channel\n\t\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\t\t// if counter equals 0, sample and hold\n\t\t\t\t\tif (this.count % d === 0){\n\t\t\t\t\t\tthis.sah[channel] = input[channel][i];\n\t\t\t\t\t}\n\t\t\t\t\t// output the currently held sample\n\t\t\t\t\toutput[channel][i] = this.sah[channel];\n\t\t\t\t}\n\t\t\t\t// increment sample counter\n\t\t\t\tthis.count++;\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('downsampler-processor', DownSampleProcessor);\n\n// A distortion algorithm using the tanh (hyperbolic-tangent) as a \n// waveshaping technique. Some mapping to apply a more equal loudness \n// distortion is applied on the overdrive parameter\n//\nclass TanhDistortionProcessor extends AudioWorkletProcessor {\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\t// simple waveshaping with tanh\n\t\t\t\t\toutput[channel][i] = Math.tanh(input[channel][i]);\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('tanh-distortion-processor', TanhDistortionProcessor);\n\n// A distortion/compression effect of an incoming signal\n// Based on an algorithm by Peter McCulloch\n// \nclass SquashProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 1024\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\t\t\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\t// (s * a) / ((s * a)^2 * 0.28 + 1) / √a\n\t\t\t\t\t// drive amount, minimum of 1\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\t// set the waveshaper effect\n\t\t\t\t\tconst s = input[channel][i];\n\t\t\t\t\tconst p = (s * a) / ((s * a) * (s * a) * 0.28 + 1.0);\n\t\t\t\t\toutput[channel][i] = p;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('squash-processor', SquashProcessor);";
 Tone.getContext().addAudioWorkletModule(URL.createObjectURL(new Blob([ fxExtensions ], { type: 'text/javascript' })));
 
-// const minifyInline = require('minify-inline-json');
-
 // Mercury main class controls Tone and loads samples
 // also has the interpreter evaluating the code and adding the instruments
 // 
 class Mercury extends MercuryInterpreter {
-	constructor(callback){
-		// initalize the constructor of inheriting class
-		super();
+	constructor({ onload, hydra, p5canvas } = {}){
+		// initalize the constructor of inheriting class with 
+		// optionally a hydra and p5 canvas
+		super({ hydra, p5canvas });
+
 		// store sample files in buffers
 		this.samples = JSON.parse("{\n  \"noise_a\": \"noise/noise_a.wav\",\n  \"drone_cymbal\": \"ambient/cymbal/drone_cymbal.wav\",\n  \"drone_cymbal_01\": \"ambient/cymbal/drone_cymbal_01.wav\",\n  \"clap_808\": \"drums/clap/clap_808.wav\",\n  \"clap_808_short\": \"drums/clap/clap_808_short.wav\",\n  \"clap_909\": \"drums/clap/clap_909.wav\",\n  \"clap_min\": \"drums/clap/clap_min.wav\",\n  \"hat_808\": \"drums/hat/hat_808.wav\",\n  \"hat_808_open\": \"drums/hat/hat_808_open.wav\",\n  \"hat_808_semi\": \"drums/hat/hat_808_semi.wav\",\n  \"hat_909\": \"drums/hat/hat_909.wav\",\n  \"hat_909_open\": \"drums/hat/hat_909_open.wav\",\n  \"hat_909_open_short\": \"drums/hat/hat_909_open_short.wav\",\n  \"hat_909_short\": \"drums/hat/hat_909_short.wav\",\n  \"hat_click\": \"drums/hat/hat_click.wav\",\n  \"hat_dub\": \"drums/hat/hat_dub.wav\",\n  \"hat_min\": \"drums/hat/hat_min.wav\",\n  \"hat_min_open\": \"drums/hat/hat_min_open.wav\",\n  \"kick_808\": \"drums/kick/kick_808.wav\",\n  \"kick_808_dist\": \"drums/kick/kick_808_dist.wav\",\n  \"kick_909\": \"drums/kick/kick_909.wav\",\n  \"kick_909_dist\": \"drums/kick/kick_909_dist.wav\",\n  \"kick_909_dist_long\": \"drums/kick/kick_909_dist_long.wav\",\n  \"kick_909_long\": \"drums/kick/kick_909_long.wav\",\n  \"kick_deep\": \"drums/kick/kick_deep.wav\",\n  \"kick_dub\": \"drums/kick/kick_dub.wav\",\n  \"kick_house\": \"drums/kick/kick_house.wav\",\n  \"kick_min\": \"drums/kick/kick_min.wav\",\n  \"kick_sub\": \"drums/kick/kick_sub.wav\",\n  \"kick_ua\": \"drums/kick/kick_ua.wav\",\n  \"kick_vintage\": \"drums/kick/kick_vintage.wav\",\n  \"block\": \"drums/perc/block.wav\",\n  \"block_lo\": \"drums/perc/block_lo.wav\",\n  \"bongo\": \"drums/perc/bongo.wav\",\n  \"bongo_lo\": \"drums/perc/bongo_lo.wav\",\n  \"clave_808\": \"drums/perc/clave_808.wav\",\n  \"cowbell_808\": \"drums/perc/cowbell_808.wav\",\n  \"cymbal_808\": \"drums/perc/cymbal_808.wav\",\n  \"maracas_808\": \"drums/perc/maracas_808.wav\",\n  \"snare_808\": \"drums/snare/snare_808.wav\",\n  \"snare_909\": \"drums/snare/snare_909.wav\",\n  \"snare_909_short\": \"drums/snare/snare_909_short.wav\",\n  \"snare_ac\": \"drums/snare/snare_ac.wav\",\n  \"snare_dnb\": \"drums/snare/snare_dnb.wav\",\n  \"snare_dub\": \"drums/snare/snare_dub.wav\",\n  \"snare_fat\": \"drums/snare/snare_fat.wav\",\n  \"snare_hvy\": \"drums/snare/snare_hvy.wav\",\n  \"snare_min\": \"drums/snare/snare_min.wav\",\n  \"snare_rock\": \"drums/snare/snare_rock.wav\",\n  \"snare_step\": \"drums/snare/snare_step.wav\",\n  \"tabla_01\": \"drums/tabla/tabla_01.wav\",\n  \"tabla_02\": \"drums/tabla/tabla_02.wav\",\n  \"tabla_03\": \"drums/tabla/tabla_03.wav\",\n  \"tabla_hi\": \"drums/tabla/tabla_hi.wav\",\n  \"tabla_hi_long\": \"drums/tabla/tabla_hi_long.wav\",\n  \"tabla_hi_short\": \"drums/tabla/tabla_hi_short.wav\",\n  \"tabla_lo\": \"drums/tabla/tabla_lo.wav\",\n  \"tabla_lo_long\": \"drums/tabla/tabla_lo_long.wav\",\n  \"tabla_lo_short\": \"drums/tabla/tabla_lo_short.wav\",\n  \"tabla_mid\": \"drums/tabla/tabla_mid.wav\",\n  \"tabla_mid_long\": \"drums/tabla/tabla_mid_long.wav\",\n  \"tabla_mid_short\": \"drums/tabla/tabla_mid_short.wav\",\n  \"tom_808\": \"drums/tom/tom_808.wav\",\n  \"tom_hi\": \"drums/tom/tom_hi.wav\",\n  \"tom_lo\": \"drums/tom/tom_lo.wav\",\n  \"tom_mid\": \"drums/tom/tom_mid.wav\",\n  \"tongue\": \"foley/body/tongue.wav\",\n  \"tongue_lo\": \"foley/body/tongue_lo.wav\",\n  \"shatter\": \"foley/glass/shatter.wav\",\n  \"metal\": \"foley/metal/metal.wav\",\n  \"metal_lo\": \"foley/metal/metal_lo.wav\",\n  \"wobble\": \"foley/plastic/wobble.wav\",\n  \"wobble_02\": \"foley/plastic/wobble_02.wav\",\n  \"door\": \"foley/wood/door.wav\",\n  \"scrape\": \"foley/wood/scrape.wav\",\n  \"scrape_01\": \"foley/wood/scrape_01.wav\",\n  \"wood_hit\": \"foley/wood/wood_hit.wav\",\n  \"wood_metal\": \"foley/wood/wood_metal.wav\",\n  \"wood_plate\": \"foley/wood/wood_plate.wav\",\n  \"bell\": \"idiophone/bell/bell.wav\",\n  \"chimes\": \"idiophone/chimes/chimes.wav\",\n  \"chimes_chord\": \"idiophone/chimes/chimes_chord.wav\",\n  \"chimes_chord_01\": \"idiophone/chimes/chimes_chord_01.wav\",\n  \"chimes_chord_02\": \"idiophone/chimes/chimes_chord_02.wav\",\n  \"chimes_hi\": \"idiophone/chimes/chimes_hi.wav\",\n  \"gong_hi\": \"idiophone/gong/gong_hi.wav\",\n  \"gong_lo\": \"idiophone/gong/gong_lo.wav\",\n  \"kalimba_a\": \"idiophone/kalimba/kalimba_a.wav\",\n  \"kalimba_ab\": \"idiophone/kalimba/kalimba_ab.wav\",\n  \"kalimba_cis\": \"idiophone/kalimba/kalimba_cis.wav\",\n  \"kalimba_e\": \"idiophone/kalimba/kalimba_e.wav\",\n  \"kalimba_g\": \"idiophone/kalimba/kalimba_g.wav\",\n  \"bamboo_a\": \"idiophone/marimba-bamboo/bamboo_a.wav\",\n  \"bamboo_c\": \"idiophone/marimba-bamboo/bamboo_c.wav\",\n  \"bamboo_f\": \"idiophone/marimba-bamboo/bamboo_f.wav\",\n  \"bamboo_g\": \"idiophone/marimba-bamboo/bamboo_g.wav\",\n  \"bowl_hi\": \"idiophone/singing-bowl/bowl_hi.wav\",\n  \"bowl_lo\": \"idiophone/singing-bowl/bowl_lo.wav\",\n  \"bowl_mid\": \"idiophone/singing-bowl/bowl_mid.wav\",\n  \"rhodes_8bit\": \"keys/pad/rhodes_8bit.wav\",\n  \"piano_a\": \"keys/piano/piano_a.wav\",\n  \"piano_b\": \"keys/piano/piano_b.wav\",\n  \"piano_c\": \"keys/piano/piano_c.wav\",\n  \"piano_d\": \"keys/piano/piano_d.wav\",\n  \"piano_e\": \"keys/piano/piano_e.wav\",\n  \"piano_f\": \"keys/piano/piano_f.wav\",\n  \"piano_g\": \"keys/piano/piano_g.wav\",\n  \"amen\": \"loops/breaks/amen.wav\",\n  \"amen_alt\": \"loops/breaks/amen_alt.wav\",\n  \"amen_break\": \"loops/breaks/amen_break.wav\",\n  \"amen_fill\": \"loops/breaks/amen_fill.wav\",\n  \"house\": \"loops/breaks/house.wav\",\n  \"chimes_l\": \"loops/chimes/chimes_l.wav\",\n  \"noise_c\": \"loops/noise/noise_c.wav\",\n  \"noise_e\": \"loops/noise/noise_e.wav\",\n  \"noise_e_01\": \"loops/noise/noise_e_01.wav\",\n  \"noise_mw\": \"loops/noise/noise_mw.wav\",\n  \"noise_p\": \"loops/noise/noise_p.wav\",\n  \"noise_r\": \"loops/noise/noise_r.wav\",\n  \"choir_01\": \"vocal/choir/choir_01.wav\",\n  \"choir_02\": \"vocal/choir/choir_02.wav\",\n  \"choir_03\": \"vocal/choir/choir_03.wav\",\n  \"choir_o\": \"vocal/choir/choir_o.wav\",\n  \"wiper\": \"loops/foley/car/wiper.wav\",\n  \"wiper_out\": \"loops/foley/car/wiper_out.wav\",\n  \"wood_l\": \"loops/foley/wood/wood_l.wav\",\n  \"wood_l_01\": \"loops/foley/wood/wood_l_01.wav\",\n  \"violin_a\": \"string/bowed/violin/violin_a.wav\",\n  \"violin_b\": \"string/bowed/violin/violin_b.wav\",\n  \"violin_c\": \"string/bowed/violin/violin_c.wav\",\n  \"violin_d\": \"string/bowed/violin/violin_d.wav\",\n  \"violin_e\": \"string/bowed/violin/violin_e.wav\",\n  \"violin_f\": \"string/bowed/violin/violin_f.wav\",\n  \"violin_g\": \"string/bowed/violin/violin_g.wav\",\n  \"harp_down\": \"string/plucked/harp/harp_down.wav\",\n  \"harp_up\": \"string/plucked/harp/harp_up.wav\",\n  \"pluck_a\": \"string/plucked/violin/pluck_a.wav\",\n  \"pluck_b\": \"string/plucked/violin/pluck_b.wav\",\n  \"pluck_c\": \"string/plucked/violin/pluck_c.wav\",\n  \"pluck_d\": \"string/plucked/violin/pluck_d.wav\",\n  \"pluck_e\": \"string/plucked/violin/pluck_e.wav\",\n  \"pluck_f\": \"string/plucked/violin/pluck_f.wav\",\n  \"pluck_g\": \"string/plucked/violin/pluck_g.wav\"\n}\n");
 
 		// this.buffers = new Tone.ToneAudioBuffers();
 		// add the buffers via function
 		// this.addBuffers(['http://localhost:8080/mercury-engine/src/data/samples.json'])
+
+		// setting parameters
+		this.bpm = 100;
+		this.volume = 1;
 
 		// effects on main output for Tone
 		this.gain = new Tone.Gain(1);
@@ -17445,7 +17463,7 @@ class Mercury extends MercuryInterpreter {
 			onload: () => {
 				console.log('Samples loaded', this.buffers);
 				// executes a callback from the class constructor
-				if (callback){ callback(); }
+				if (onload){ onload(); }
 			}
 		});
 	}
@@ -17480,7 +17498,8 @@ class Mercury extends MercuryInterpreter {
 	}
 
 	// set the bpm and optionally ramp in milliseconds
-	bpm(bpm, ramp=0) {
+	setBPM(bpm, ramp=0) {
+		this.bpm = bpm;
 		if (ramp > 0){
 			Tone.Transport.bpm.rampTo(bpm, ramp / 1000);
 		} else {
@@ -17496,7 +17515,7 @@ class Mercury extends MercuryInterpreter {
 	// generate a random bpm between 75 and 150
 	randomBPM(){
 		let bpm = Math.floor(Math.random() * 75) + 75.0;
-		this.bpm(bpm);
+		this.setBPM(bpm);
 	}
 
 	// add files to the buffer from a single File Link
@@ -17607,11 +17626,17 @@ class Mercury extends MercuryInterpreter {
 
 	// set volume in floatingpoint and ramptime
 	setVolume(v, t=0){
+		this.volume = v;
 		if (t > 0){
 			this.gain.gain.rampTo(v, t/1000, Tone.now());
 		} else {
 			this.gain.gain.setValueAtTime(v, Tone.now());
 		}
+	}
+
+	// get the volume as float between 0-1
+	getVolume(){
+		return this.gain.gain.value;
 	}
 
 	// a recording function

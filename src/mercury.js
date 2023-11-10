@@ -4,7 +4,8 @@ Mercury Engine by Timo Hoogland (c) 2023
 	more info:
 	https://www.timohoogland.com
 	https://mercury.timohoogland.com
-	https://github.com/tmhglnd/mercury
+	https://github.com/tmhglnd/mercury-playground
+	https://github.com/tmhglnd/mercury-engine
 
 `);
 
@@ -17,21 +18,25 @@ const fs = require('fs');
 const fxExtensions = fs.readFileSync('./src/core/effects/Processors.js', 'utf-8');
 Tone.getContext().addAudioWorkletModule(URL.createObjectURL(new Blob([ fxExtensions ], { type: 'text/javascript' })));
 
-// const minifyInline = require('minify-inline-json');
-
 // Mercury main class controls Tone and loads samples
 // also has the interpreter evaluating the code and adding the instruments
 // 
 class Mercury extends MercuryInterpreter {
-	constructor(callback){
-		// initalize the constructor of inheriting class
-		super();
+	constructor({ onload, hydra, p5canvas } = {}){
+		// initalize the constructor of inheriting class with 
+		// optionally a hydra and p5 canvas
+		super({ hydra, p5canvas });
+
 		// store sample files in buffers
 		this.samples = JSON.parse(fs.readFileSync('./src/data/samples.json', 'utf-8'));
 
 		// this.buffers = new Tone.ToneAudioBuffers();
 		// add the buffers via function
 		// this.addBuffers(['http://localhost:8080/mercury-engine/src/data/samples.json'])
+
+		// setting parameters
+		this.bpm = 100;
+		this.volume = 1;
 
 		// effects on main output for Tone
 		this.gain = new Tone.Gain(1);
@@ -49,7 +54,7 @@ class Mercury extends MercuryInterpreter {
 			onload: () => {
 				console.log('Samples loaded', this.buffers);
 				// executes a callback from the class constructor
-				if (callback){ callback(); }
+				if (onload){ onload(); }
 			}
 		});
 	}
@@ -84,7 +89,8 @@ class Mercury extends MercuryInterpreter {
 	}
 
 	// set the bpm and optionally ramp in milliseconds
-	bpm(bpm, ramp=0) {
+	setBPM(bpm, ramp=0) {
+		this.bpm = bpm;
 		if (ramp > 0){
 			Tone.Transport.bpm.rampTo(bpm, ramp / 1000);
 		} else {
@@ -100,7 +106,7 @@ class Mercury extends MercuryInterpreter {
 	// generate a random bpm between 75 and 150
 	randomBPM(){
 		let bpm = Math.floor(Math.random() * 75) + 75.0;
-		this.bpm(bpm);
+		this.setBPM(bpm);
 	}
 
 	// add files to the buffer from a single File Link
@@ -211,11 +217,17 @@ class Mercury extends MercuryInterpreter {
 
 	// set volume in floatingpoint and ramptime
 	setVolume(v, t=0){
+		this.volume = v;
 		if (t > 0){
 			this.gain.gain.rampTo(v, t/1000, Tone.now());
 		} else {
 			this.gain.gain.setValueAtTime(v, Tone.now());
 		}
+	}
+
+	// get the volume as float between 0-1
+	getVolume(){
+		return this.gain.gain.value;
 	}
 
 	// a recording function

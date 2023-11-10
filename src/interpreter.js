@@ -2,7 +2,7 @@
 const Tone = require('tone');
 const Mercury = require('mercury-lang');
 const TL = require('total-serialism').Translate;
-// const Util = require('total-serialism').Utility;
+const Util = require('total-serialism').Utility;
 
 const MonoSample = require('./core/MonoSample.js');
 const MonoMidi = require('./core/MonoMidi.js');
@@ -13,7 +13,7 @@ const PolySample = require('./core/PolySample.js');
 const Tempos = require('./data/genre-tempos.json');
 
 class MercuryInterpreter {
-	constructor(){
+	constructor({ hydra, p5canvas } = {}){
 		// cross-fade time
 		this.crossFade = 0.5;
 		
@@ -28,6 +28,10 @@ class MercuryInterpreter {
 		this.parse;
 		this.tree;
 		this.errors;
+
+		// Hydra and P5 canvas
+		this.canvas = hydra;
+		this.p5canvas = p5canvas;
 	}
 
 	getSounds(){
@@ -64,19 +68,27 @@ class MercuryInterpreter {
 		s.length = 0;
 	}
 
-	code({ file='', canvas, p5canvas } = {}){
+	setCrossFade(f){
+		// set the crossFade in milliseconds
+		this.crossFade = Number(f) / 1000;
+		// log(`Crossfade: ${f}ms`);
+	}
+
+	code(file=''){
 		// parse and evaluate the inputted code
 		// as an asyncronous function with promise
 		let c = (!file)? this._code : file;
 		this._code = c;
 
 		let t = Tone.Transport.seconds;
+		
 		// is this necessary?
 		// let parser = new Promise((resolve) => {
 		// 	return resolve(Mercury(c));
 		// });
 		// this.parse = await parser;
 		this.parse = Mercury(c);
+		
 		console.log(`Evaluated code in: ${((Tone.Transport.seconds-t) * 1000).toFixed(3)}ms`);
 
 		this.tree = this.parse.parseTree;
@@ -100,17 +112,6 @@ class MercuryInterpreter {
 			console.log(p);
 		});
 
-		// hide canvas and noLoop
-		// p5canvas.hide();
-
-		// handle .display to p5
-		// tree.display.forEach((p) => {
-		// 	// restart canvas if view is used
-		// 	let n = Util.mul(Util.normalize(p), 255);
-		// 	p5canvas.sketch.fillCanvas(n);
-		// 	p5canvas.display();
-		// });
-
 		// set timer to check evaluation time
 		t = Tone.Transport.seconds;
 
@@ -118,9 +119,7 @@ class MercuryInterpreter {
 		const globalMap = {
 			'crossFade' : (args) => {
 				// set crossFade time in ms
-				this.crossFade = Number(args[0]) / 1000;
-				// log(`crossfade time is ${args[0]}ms`);
-				console.log(`Crossfade: ${args[0]}ms`);
+				this.setCrossFade(args[0]);
 			},
 			'tempo' : (args) => {
 				let t = args[0];
@@ -132,7 +131,7 @@ class MercuryInterpreter {
 					}
 					args[0] = t;
 				}
-				this.bpm(...args);
+				this.setBPM(...args);
 				// engine.setBPM(...args);
 				// log(`set bpm to ${bpm}`);
 			}, 
@@ -185,38 +184,38 @@ class MercuryInterpreter {
 		// Handling all the different instrument types here
 		const objectMap = {
 			'sample' : (obj) => {		
-				let inst = new MonoSample(this, obj.type, canvas);
+				let inst = new MonoSample(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
 			'loop' : (obj) => {		
-				let inst = new MonoSample(this, obj.type, canvas);
+				let inst = new MonoSample(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
 			'synth' : (obj) => {		
 				console.log(obj);
-				let inst = new MonoSynth(this, obj.type, canvas);
+				let inst = new MonoSynth(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
 			'polySynth' : (obj) => {
-				let inst = new PolySynth(this, obj.type, canvas);
+				let inst = new PolySynth(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
 			'polySample' : (obj) => {
-				let inst = new PolySample(this, obj.type, canvas);
+				let inst = new PolySample(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
 			'midi' : (obj) => {
-				let inst = new MonoMidi(this, obj.type, canvas);
+				let inst = new MonoMidi(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
 			'input' : (obj) => {
-				let inst = new MonoInput(this, obj.type, canvas);
+				let inst = new MonoInput(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
@@ -272,6 +271,20 @@ class MercuryInterpreter {
 		this.removeSounds(this._sounds, this.crossFade);
 
 		this.resume();
+
+		// if p5js canvas is included in the html page
+		if (this.p5canvas){ 
+			// hide canvas and noLoop			
+			this.p5canvas.hide(); 
+		
+			// handle .display to p5
+			tree.display.forEach((p) => {
+				// restart canvas if view is used
+				let n = Util.mul(Util.normalize(p), 255);
+				this.p5canvas.sketch.fillCanvas(n);
+				this.p5canvas.display();
+			});
+		}
 	}
 }
 module.exports = { MercuryInterpreter }
