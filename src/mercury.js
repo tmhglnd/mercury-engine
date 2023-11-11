@@ -35,8 +35,8 @@ class Mercury extends MercuryInterpreter {
 		// this.addBuffers(['http://localhost:8080/mercury-engine/src/data/samples.json'])
 
 		// setting parameters
-		this.bpm = 100;
-		this.volume = 1;
+		this.bpm;
+		this.volume;
 
 		// effects on main output for Tone
 		this.gain = new Tone.Gain(1);
@@ -48,15 +48,31 @@ class Mercury extends MercuryInterpreter {
 		this.recorder = new Tone.Recorder({ mimeType: 'audio/webm' });
 		this.gain.connect(this.recorder);
 
+		// default settings
+		this.setBPM(100);
+		this.setVolume(1);
+		this.setHighPass(18000);
+		this.setLowPass(5);
+		this.setCrossFade(250);
+
+		// load the buffers from the github
 		this.buffers = new Tone.ToneAudioBuffers({
 			urls: this.samples,
 			baseUrl: "https://raw.githubusercontent.com/tmhglnd/mercury-playground/main/public/assets/samples/",
 			onload: () => {
 				console.log('Samples loaded', this.buffers);
 				// executes a callback from the class constructor
+				// if a callback is provided
 				if (onload){ onload(); }
 			}
 		});
+	}
+
+	// the log message is used to log to the console but
+	// can be overwritten with a custom log message
+	// to also display logs from instruments in the html
+	log(msg){
+		console.log(msg);
 	}
 
 	// resume webaudio and transport
@@ -152,7 +168,7 @@ class Mercury extends MercuryInterpreter {
 
 		// add to ToneAudioBuffers
 		this.buffers.add(n, url, () => {
-			console.log(`sound added as: ${n}`);
+			this.log(`sound added as: ${n}`);
 			URL.revokeObjectURL(url);
 
 			// also add soundfiles to menu for easy selection
@@ -161,7 +177,7 @@ class Mercury extends MercuryInterpreter {
 			// o.value = o.innerHTML = n;
 			// m.appendChild(o);
 		}, (e) => {
-			console.log(`error adding sound from: ${n}`);
+			this.log(`error adding sound from: ${n}`);
 		});
 	}
 
@@ -249,7 +265,7 @@ class Mercury extends MercuryInterpreter {
 				anchor.click();
 			}
 		} catch(e) {
-			console.log(`Error starting/stopping recording ${e}`);
+			this.log(`Error starting/stopping recording ${e}`);
 		}
 	}
 

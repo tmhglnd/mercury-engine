@@ -15,7 +15,7 @@ const Tempos = require('./data/genre-tempos.json');
 class MercuryInterpreter {
 	constructor({ hydra, p5canvas } = {}){
 		// cross-fade time
-		this.crossFade = 0.5;
+		this.crossFade;
 		
 		// arrays with the current and previous instruments for crossfade
 		this._sounds = [];
@@ -71,7 +71,7 @@ class MercuryInterpreter {
 	setCrossFade(f){
 		// set the crossFade in milliseconds
 		this.crossFade = Number(f) / 1000;
-		// log(`Crossfade: ${f}ms`);
+		this.log(`Crossfade set to: ${f}ms`);
 	}
 
 	code(file=''){
@@ -98,18 +98,17 @@ class MercuryInterpreter {
 		// l.innerHTML = '';
 		// handle .print and .errors
 		this.errors.forEach((e) => {
-			console.log(e);
-			// log(e);
+			this.log(e);
 		});
 		if (this.errors.length > 0){
 			// return if the code contains any syntax errors
-			console.log(`Could not run because of syntax error`);
-			console.log(`Please see Help for more information`);
+			this.log(`Could not run because of syntax error`);
+			this.log(`Please see Help for more information`);
 			return;
 		}
 
 		this.tree.print.forEach((p) => {
-			console.log(p);
+			this.log(p);
 		});
 
 		// set timer to check evaluation time
@@ -126,7 +125,7 @@ class MercuryInterpreter {
 				if (isNaN(t)){
 					t = Tempos[args[0].toLowerCase()];
 					if (t === undefined){
-						console.log(`tempo ${args[0]} is not a valid genre or number`);
+						this.log(`tempo ${args[0]} is not a valid genre or number`);
 						return;
 					}
 					args[0] = t;
@@ -156,7 +155,7 @@ class MercuryInterpreter {
 				if (s.indexOf(scl) > -1){
 					TL.setScale(scl);
 				} else {
-					console.log(`${scl} is not a valid scale`);
+					this.log(`${scl} is not a valid scale`);
 				}
 				if (rt){
 					TL.setRoot(rt);
@@ -165,7 +164,7 @@ class MercuryInterpreter {
 				let tmpS = TL.getScale().scale;
 				let tmpR = TL.getScale().root;
 				// document.getElementById('scale').innerHTML = `scale = ${tmpR} ${tmpS}`;
-				// log(`set scale to ${tmpR} ${tmpS}`);
+				// this.log(`set scale to ${tmpR} ${tmpS}`);
 			},
 			'amp' : (args) => {
 				this.setVolume(...args);
@@ -250,7 +249,7 @@ class MercuryInterpreter {
 			if (objectMap[type]){
 				this.sounds.push(objectMap[type](this.tree.objects[o]));
 			} else {
-				log(`Instrument named '${type}' is not supported`);
+				this.log(`Instrument named '${type}' is not supported`);
 			}
 		}
 

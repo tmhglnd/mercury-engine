@@ -41,13 +41,21 @@ const Engine = new Mercury();
 
 ## Include in html
 
-Include latest or specific version of bundled es5 version through url in index.html 
+Include latest or a specific version of distribution (minified, es5) through url in script index.html 
 
+Recommended for most cases:
 ```html
-<script src="https://unpkg.com/mercury-engine@1.0.0/build/mercury.min.js"></script>
+<script src="https://unpkg.com/mercury-engine/dist/mercury.min.es5.js"></script>
 ```
 
-Use in a html `<script>` like so:
+Other options:
+```html
+<script src="https://unpkg.com/mercury-engine/dist/mercury.js"></script>
+<script src="https://unpkg.com/mercury-engine@1.0.0/dist/mercury.min.js"></script>
+<script src="https://unpkg.com/mercury-engine@1.0.0/dist/mercury.min.es5.js"></script>
+```
+
+Load the engine in the `<script>` code like so:
 
 ```js
 const { Mercury } = MercuryEngine;
@@ -57,19 +65,27 @@ const Engine = new Mercury();
 
 # Usage
 
+### Include and initialize
+
 ```js
 // include the package
 const { Mercury } = require('mercury-engine');
 
-// initialize the engine and included a callback function
-const Engine = Mercury(() => {
-	console.log('This callback is called when samples are loaded!');
+// initialize the engine and included a callback function through { onload: }
+const Engine = Mercury({
+	onload: () => {
+		console.log('This callback is called when samples are loaded!');
+	}
 });
+```
 
+### Resume, evaluate and silence
+
+```js
 // resume the transport and start the webaudio
 // this has to be done from a user interaction (click/key) to allow sound
 // to play from the browser window
-Engine.resume()
+Engine.resume();
 
 // Evaluate a mercury code file by providing a string of code
 // This also resumes the transport if .resume() was not called yet
@@ -82,33 +98,68 @@ Engine.code(`
 
 // stop the transport and silence the audio
 Engine.silence();
+```
 
+### Recording
+
+```js
 // start the recording of the sound
 Engine.record(true);
 
 // returns 'started' if the recording is on
-Engine.isRecording()
+Engine.isRecording();
 
 // stop the recording and download the file myRecording.webm
 Engine.record(false, 'myRecording');
+```
 
-// set the BPM without adding `set tempo` to the Mercury code
+### Settings
+
+```js
+// set the BPM without using `set tempo` in the Mercury code
 Engine.setBPM(140);
 
-// set the volume without adding `set volume` to the Mercury code
+// set a randomized BPM
+Engine.randomBPM();
+
+// set the volume without using `set volume` in the Mercury code
 Engine.setVolume(0.5);
 
+// set the crossFade time between 2 evaluations in milliseconds
+Engine.setCrossFade(500);
+
+// get the value for any of the settings
+console.log(Engine.bpm);
+console.log(Engine.volume);
+console.log(Engine.crossFade);
+```
+
+### Samples
+
+```js
 // add your own samples from for example a url like raw github or freesound
 // the url can also contain a .json file that references multiple samples and 
 // the sample name
-Engine.addSamples();
+Engine.addBuffers();
+
+Engine.getBuffers();
+```
+
+### Customized log function
+
+```js
+// replace the log() function in the engine for a custom log fuction to
+// for example display errors in HTML elements
+Engine.log = (print) => {
+	let p = JSON.stringify(print).replace(/\,/g, ' ').replace(/\"/g, '');
+	document.getElementById('log-div').innerHTML += `${p}<br>`;
+}
 ```
 
 ## 📋 To Do
 
 - [ ] Include OSC communcation options via socket.io
 - [ ] Use engine in the Mercury-playground instead of the other code-base
-- [ ] Create examples for the engine
 - [ ] Allow control of parameters via DOM elements
 
 ## 🔋 Powered By
