@@ -44,11 +44,13 @@ const Engine = new Mercury();
 Include latest or a specific version of distribution (minified, es5) through url in script index.html 
 
 Recommended for most cases:
+
 ```html
 <script src="https://unpkg.com/mercury-engine/dist/mercury.min.es5.js"></script>
 ```
 
 Other options:
+
 ```html
 <script src="https://unpkg.com/mercury-engine/dist/mercury.js"></script>
 <script src="https://unpkg.com/mercury-engine@1.0.0/dist/mercury.min.js"></script>
@@ -85,7 +87,7 @@ const Engine = Mercury({
 
 ### Resume, evaluate and silence
 
-Resume the transport and start the webaudio. This has to be done from a user interaction (click/key) to allow sound to play from the browser window.
+Resume the transport and start the webaudio. This has to be done from a user interaction (click or keypress) to allow sound to play from the browser window.
 
 ```js
 Engine.resume();
@@ -108,6 +110,12 @@ Stop the transport and silence the audio
 Engine.silence();
 ```
 
+Return the last succesfully evaluated code. If code is evaluated that resulted in an error it is not stored.
+
+```js
+Engine.getCode();
+```
+
 ### Recording
 
 Start the recording of the sound
@@ -122,7 +130,7 @@ Returns 'started' if the recording is on
 Engine.isRecording();
 ```
 
-Stop the recording and download the file myRecording.webm
+Stop the recording and download the file `myRecording.webm`
 
 ```js
 Engine.record(false, 'myRecording');
@@ -142,16 +150,28 @@ Set a randomized BPM
 Engine.randomBPM();
 ```
 
-Set the volume without using `set volume` in the Mercury code
+Set the volume without using `set volume` in the Mercury code. Volume in floating amplitude 0 to 1.
 
 ```js
 Engine.setVolume(0.5);
 ```
 
-Set the crossFade time between 2 evaluations in milliseconds
+Set the crossFade between 2 code evaluations without using `set crossFade` in the Mercury code. Time in milliseconds.
 
 ```js
 Engine.setCrossFade(500);
+```
+
+Set the HighPass Filter cutoff frequency without using `set highPass` in the Mercury code.
+
+```js
+Engine.setHighPass(400);
+```
+
+Set the LowPass Filter cutoff frequency without using `set lowPass` in the Mercury code.
+
+```js
+Engine.setLowPass(5000);
 ```
 
 Get the value for any of the settings
@@ -160,6 +180,8 @@ Get the value for any of the settings
 console.log(Engine.bpm);
 console.log(Engine.volume);
 console.log(Engine.crossFade);
+console.log(Engine.highPass);
+console.log(Engine.lowPass);
 ```
 
 ### Samples

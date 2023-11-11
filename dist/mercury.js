@@ -17192,15 +17192,19 @@ class MercuryInterpreter {
 		this.log(`Crossfade set to: ${f}ms`);
 	}
 
+	getCode(){
+		// return the last evaluated code
+		return this._code;
+	}
+
 	code(file=''){
 		// parse and evaluate the inputted code
-		// as an asyncronous function with promise
 		let c = (!file)? this._code : file;
-		this._code = c;
-
-		let t = Tone.Transport.seconds;
 		
+		let t = Tone.Transport.seconds;
+				
 		// is this necessary?
+		// as an asyncronous function with promise
 		// let parser = new Promise((resolve) => {
 		// 	return resolve(Mercury(c));
 		// });
@@ -17224,6 +17228,8 @@ class MercuryInterpreter {
 			this.log(`Please see Help for more information`);
 			return;
 		}
+		// if no errors the last evaluated code is stored
+		this._code = c;
 
 		this.tree.print.forEach((p) => {
 			this.log(p);
@@ -17445,12 +17451,14 @@ class Mercury extends MercuryInterpreter {
 		// setting parameters
 		this.bpm;
 		this.volume;
+		this.lowPass;
+		this.highPass;
 
 		// effects on main output for Tone
 		this.gain = new Tone.Gain(1);
-		this.lowPass = new Tone.Filter(18000, 'lowpass');
-		this.highPass = new Tone.Filter(5, 'highpass');
-		Tone.Destination.chain(this.lowPass, this.highPass, this.gain);
+		this.lowPassF = new Tone.Filter(18000, 'lowpass');
+		this.highPassF = new Tone.Filter(5, 'highpass');
+		Tone.Destination.chain(this.lowPassF, this.highPassF, this.gain);
 
 		// a recorder for the sound
 		this.recorder = new Tone.Recorder({ mimeType: 'audio/webm' });
@@ -17623,19 +17631,21 @@ class Mercury extends MercuryInterpreter {
 
 	// set lowpass frequency cutoff and ramptime
 	setLowPass(f, t=0){
+		this.lowPass = f;
 		if (t > 0){
-			this.lowPass.frequency.rampTo(f, t/1000, Tone.now());
+			this.lowPassF.frequency.rampTo(f, t/1000, Tone.now());
 		} else {
-			this.lowPass.frequency.setValueAtTime(f, Tone.now());
+			this.lowPassF.frequency.setValueAtTime(f, Tone.now());
 		}
 	}
 
 	// set highpass frequency cutoff and ramptime
 	setHighPass(f, t=0){
+		this.highPass = f;
 		if (t > 0){
-			this.highPass.frequency.rampTo(f, t/1000, Tone.now());
+			this.highPassF.frequency.rampTo(f, t/1000, Tone.now());
 		} else {
-			this.highPass.frequency.setValueAtTime(f, Tone.now());
+			this.highPassF.frequency.setValueAtTime(f, Tone.now());
 		}
 	}
 

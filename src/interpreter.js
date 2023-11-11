@@ -74,15 +74,19 @@ class MercuryInterpreter {
 		this.log(`Crossfade set to: ${f}ms`);
 	}
 
+	getCode(){
+		// return the last evaluated code
+		return this._code;
+	}
+
 	code(file=''){
 		// parse and evaluate the inputted code
-		// as an asyncronous function with promise
 		let c = (!file)? this._code : file;
-		this._code = c;
-
-		let t = Tone.Transport.seconds;
 		
+		let t = Tone.Transport.seconds;
+				
 		// is this necessary?
+		// as an asyncronous function with promise
 		// let parser = new Promise((resolve) => {
 		// 	return resolve(Mercury(c));
 		// });
@@ -106,6 +110,8 @@ class MercuryInterpreter {
 			this.log(`Please see Help for more information`);
 			return;
 		}
+		// if no errors the last evaluated code is stored
+		this._code = c;
 
 		this.tree.print.forEach((p) => {
 			this.log(p);
