@@ -23,7 +23,7 @@ Mercury currently has 2 versions:
 
 [**💬 Join the Mercury Community on Discord**](https://discord.gg/vt59NYU)
 
-![The Mercury playground in the browser](media/screenshot.png)
+<!-- ![The Mercury playground in the browser](media/screenshot.png) -->
 
 # 🚀 Install
 
@@ -67,11 +67,15 @@ const Engine = new Mercury();
 
 ### Include and initialize
 
-```js
-// include the package
-const { Mercury } = require('mercury-engine');
+Include the package
 
-// initialize the engine and included a callback function through { onload: }
+```js
+const { Mercury } = require('mercury-engine');
+```
+
+Initialize the engine and include a callback function through { onload: }
+
+```js
 const Engine = Mercury({
 	onload: () => {
 		console.log('This callback is called when samples are loaded!');
@@ -81,54 +85,78 @@ const Engine = Mercury({
 
 ### Resume, evaluate and silence
 
-```js
-// resume the transport and start the webaudio
-// this has to be done from a user interaction (click/key) to allow sound
-// to play from the browser window
-Engine.resume();
+Resume the transport and start the webaudio. This has to be done from a user interaction (click/key) to allow sound to play from the browser window.
 
-// Evaluate a mercury code file by providing a string of code
-// This also resumes the transport if .resume() was not called yet
+```js
+Engine.resume();
+```
+
+Evaluate a mercury code file by providing a string of code. This also resumes the transport if .resume() was not called yet.
+
+```js
 Engine.code(`
 	set tempo 100
 	new sample kick_909 time(1/4)
 	new sample hat_909 time(1/4 1/8) gain(0.6)
 	new synth saw note(0 0) time(1/16) shape(1 80)
 `);
+```
 
-// stop the transport and silence the audio
+Stop the transport and silence the audio
+
+```js
 Engine.silence();
 ```
 
 ### Recording
 
+Start the recording of the sound
+
 ```js
-// start the recording of the sound
 Engine.record(true);
+```
 
-// returns 'started' if the recording is on
+Returns 'started' if the recording is on
+
+```js
 Engine.isRecording();
+```
 
-// stop the recording and download the file myRecording.webm
+Stop the recording and download the file myRecording.webm
+
+```js
 Engine.record(false, 'myRecording');
 ```
 
 ### Settings
 
+Set the BPM without using `set tempo` in the Mercury code
+
 ```js
-// set the BPM without using `set tempo` in the Mercury code
 Engine.setBPM(140);
+```
 
-// set a randomized BPM
+Set a randomized BPM
+
+```js
 Engine.randomBPM();
+```
 
-// set the volume without using `set volume` in the Mercury code
+Set the volume without using `set volume` in the Mercury code
+
+```js
 Engine.setVolume(0.5);
+```
 
-// set the crossFade time between 2 evaluations in milliseconds
+Set the crossFade time between 2 evaluations in milliseconds
+
+```js
 Engine.setCrossFade(500);
+```
 
-// get the value for any of the settings
+Get the value for any of the settings
+
+```js
 console.log(Engine.bpm);
 console.log(Engine.volume);
 console.log(Engine.crossFade);
@@ -136,20 +164,23 @@ console.log(Engine.crossFade);
 
 ### Samples
 
-```js
-// add your own samples from for example a url like raw github or freesound
-// the url can also contain a .json file that references multiple samples and 
-// the sample name
-Engine.addBuffers();
+Add your own samples from for example a url like raw github or freesound. The url can also contain a .json file that references multiple samples and the sample name.
 
+```js
+Engine.addBuffers();
+```
+
+Get the content of all the loaded Buffers, this is returned as a ToneAudioBuffers class
+
+```js
 Engine.getBuffers();
 ```
 
 ### Customized log function
 
+Replace the log() function in the engine for a custom log fuction to for example display errors in HTML elements
+
 ```js
-// replace the log() function in the engine for a custom log fuction to
-// for example display errors in HTML elements
 Engine.log = (print) => {
 	let p = JSON.stringify(print).replace(/\,/g, ' ').replace(/\"/g, '');
 	document.getElementById('log-div').innerHTML += `${p}<br>`;

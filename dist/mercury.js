@@ -17535,7 +17535,7 @@ class Mercury extends MercuryInterpreter {
 
 	// add files to the buffer from a single File Link
 	// an array or file paths, or a json of { name:file, ... }
-	async addSamples(uploads){
+	async addBuffers(uploads){
 		// for every file from uploads
 		uploads.forEach((f) => {
 			let n = f;
