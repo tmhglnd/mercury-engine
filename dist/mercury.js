@@ -15195,7 +15195,7 @@ const LFO = function(_params){
 		if (this._waveMap[w]){
 			w = this._waveMap[w];
 		} else {
-			console.log(`'${w} is not a valid waveshape`);
+			Util.log(`'${w} is not a valid waveshape`);
 			// default wave if wave does not exist
 			w = 'sine';
 		}
@@ -15244,7 +15244,7 @@ const Filter = function(_params){
 	if (this._types[_params[0]]){
 		this._fx.set({ type: this._types[_params[0]] });
 	} else {
-		console.log(`'${_params[0]}' is not a valid filter type`);
+		Util.log(`'${_params[0]}' is not a valid filter type`);
 		this._fx.set({ type: 'lowpass' });
 	}
 	this._fx.set({ rolloff: -24 });
@@ -15318,7 +15318,7 @@ const TriggerFilter = function(_params){
 	if (this._types[_params[0][0]]){
 		this._fx.set({ type: this._types[_params[0][0]] });
 	} else {
-		console.log(`'${_params[0][0]}' is not a valid filter type. Defaulting to lowpass`);
+		Util.log(`'${_params[0][0]}' is not a valid filter type. Defaulting to lowpass`);
 		this._fx.set({ type: 'lowpass' });
 	}
 
@@ -15758,7 +15758,7 @@ class Instrument extends Sequencer {
 				let tmpF = fxMap[f[0]](f.slice(1));
 				this._fx.push(tmpF);
 			} else {
-				log(`Effect ${f[0]} does not exist`);
+				Util.log(`Effect ${f[0]} does not exist`);
 			}
 		});
 		// if any fx working
@@ -15789,6 +15789,7 @@ module.exports = Instrument;
 },{"./Effects.js":56,"./Sequencer.js":65,"./Util.js":66,"tone":44}],58:[function(require,module,exports){
 const Tone = require('tone');
 const Instrument = require('./Instrument.js');
+const Util = require('./Util.js');
 
 class MonoInput extends Instrument {
 	constructor(engine, d, canvas){
@@ -15799,7 +15800,7 @@ class MonoInput extends Instrument {
 		} else if (d.match(/in(\d+)/g)){
 			this._device = Number(d.match(/in(\d+)/)[1]);
 		} else {
-			console.log(`${d} is not a valid microphone input. defaults to in0`);
+			Util.log(`${d} is not a valid microphone input. defaults to in0`);
 			this._device = 0;
 		}
 
@@ -15812,9 +15813,9 @@ class MonoInput extends Instrument {
 	createSource(){
 		this.mic = new Tone.UserMedia().connect(this.channelStrip());
 		this.mic.open(this._device).then(() => {
-			console.log(`Opened microphone: ${window.devices[this._device]}`);
+			Util.log(`Opened microphone: ${window.devices[this._device]}`);
 		}).catch((e) => {
-			console.log(`Unable to use microphone`);
+			Util.log(`Unable to use microphone`);
 		});
 		this.mic.channelInterpretation = 'discrete';
 		
@@ -15837,7 +15838,7 @@ class MonoInput extends Instrument {
 	}
 }
 module.exports = MonoInput;
-},{"./Instrument.js":57,"tone":44}],59:[function(require,module,exports){
+},{"./Instrument.js":57,"./Util.js":66,"tone":44}],59:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
 const Sequencer = require('./Sequencer.js');
@@ -15852,7 +15853,7 @@ class MonoMidi extends Sequencer {
 		if (d === 'default'){
 			this._device = WebMidi.outputs[0];
 		} else if (!this._device){
-			console.log(`${d} is not a valid MIDI Device name, set to default`);
+			Util.log(`${d} is not a valid MIDI Device name, set to default`);
 			this._device = WebMidi.outputs[0];
 		}
 
@@ -15959,7 +15960,7 @@ class MonoMidi extends Sequencer {
 		this._cc = [];
 		cc.forEach((c) => {
 			if (isNaN(c[0])){
-				console.log(`'${c[0]}' is not a valid CC number`);
+				Util.log(`'${c[0]}' is not a valid CC number`);
 			} else {
 				let cc = [];
 				cc[0] = c[0];
@@ -16084,7 +16085,7 @@ class MonoSample extends Instrument {
 			// error if soundfile does not exist
 			else if (!this._bufs.has(s)){
 				// set default (or an ampty soundfile?)
-				console.log(`sample ${s} not found`);
+				Util.log(`sample ${s} not found`);
 				return 'kick_909';
 			}
 			return s;
@@ -16191,7 +16192,7 @@ class MonoSynth extends Instrument {
 		if (this._waveMap[w]){
 			w = this._waveMap[w];
 		} else {
-			console.log(`${w} is not a valid waveshape`);
+			Util.log(`${w} is not a valid waveshape`);
 			// default wave if wave does not exist
 			w = 'sine';
 		}
@@ -16387,7 +16388,7 @@ class PolyInstrument extends Instrument {
 	}
 
 	voices(v){
-		console.log(`Changing voice amount is not yet supported. You can use voice-stealing with steal(on)`);
+		Util.log(`Changing voice amount is not yet supported. You can use voice-stealing with steal(on)`);
 		// TODO change voice amount
 		// set the voiceamount for the polyphonic synth
 		// this.numVoices = Math.max(1, isNaN(Number(v))? 6 : Number(v));
@@ -16402,7 +16403,7 @@ class PolyInstrument extends Instrument {
 		} else if (s === 'off' || s == 0){
 			this._steal = false;
 		} else {
-			console.log(`${s} is not a valid argument for steal()`);
+			Util.log(`${s} is not a valid argument for steal()`);
 		}
 	}
 
@@ -16543,7 +16544,7 @@ class PolySample extends PolyInstrument {
 			// error if soundfile does not exist
 			else if (!this._bufs.has(s)){
 				// set default (or an ampty soundfile?)
-				console.log(`sample ${s} not found`);
+				Util.log(`sample ${s} not found`);
 				return 'kick_909';
 			}
 			return s;
@@ -16960,7 +16961,7 @@ function getOSC(a){
 		return a;
 	} else if (osc.match(/^\/[^`'"\s]+/g)){
 		if (!window.oscMessages[osc]){
-			console.log(`No message received on address ${osc}`);
+			log(`No message received on address ${osc}`);
 			return [0];
 		}
 		return window.oscMessages[osc];
@@ -16993,7 +16994,7 @@ function evalExpr(a){
 		try {
 			result = eval(expr);
 		} catch (e){
-			console.log(`Unable to evaluate expression: ${expr}`);
+			log(`Unable to evaluate expression: ${expr}`);
 		}
 		return result;
 	}
@@ -17018,8 +17019,7 @@ function formatRatio(d, bpm){
 	} else if (!isNaN(Number(d))){
 		return Number(d) * 4.0 * 60 / bpm;
 	} else {
-		// print(`${d} is not a valid time value`);
-		console.log(`${d} is not a valid time value`);
+		log(`${d} is not a valid time value`);
 		return 60 / bpm;
 	}
 }
@@ -17031,7 +17031,7 @@ function divToS(d, bpm){
 	} else if (!isNaN(Number(d))){
 		return Number(d) / 1000;
 	} else {
-		console.log(`${d} is not a valid time value`);
+		log(`${d} is not a valid time value`);
 		return 0.1;
 	}
 }
@@ -17041,7 +17041,7 @@ function noteToFreq(i, o){
 	if (isNaN(i)){
 		let _i = noteToMidi(i);
 		if (!_i){
-			console.log(`${i} is not a valid number or name`);
+			log(`${i} is not a valid number or name`);
 			i = 0;
 		} else {
 			i = _i - 48;
@@ -17072,7 +17072,7 @@ function assureWave(w){
 	if (waveMap[w]){
 		w = waveMap[w];
 	} else {
-		console.log(`${w} is not a valid waveshape`);
+		log(`${w} is not a valid waveshape`);
 		// default wave if wave does not exist
 		w = 'sine';
 	}
@@ -17084,7 +17084,7 @@ function toMidi(n=0, o=0){
 	if (isNaN(n)){
 		let _n = noteToMidi(n);
 		if (!_n){
-			console.log(`${n} is not a valid number or name`);
+			log(`${n} is not a valid number or name`);
 			n = 0;
 		} else {
 			n = _n - 36;
@@ -17093,7 +17093,18 @@ function toMidi(n=0, o=0){
 	return toScale(n + o * 12 + 36);
 }
 
-module.exports = { clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, toMidi, mtof, noteToMidi, noteToFreq, assureWave }
+// the log message is used to log to the console but also
+// sends a custom event that can be listened for to print the 
+// content at some other place in the window, for example using a div
+function log(msg){
+	console.log(msg);
+	if (window){
+		let print = new CustomEvent('mercuryLog', { detail: msg });
+		window.dispatchEvent(print);
+	}
+}
+
+module.exports = { clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }
 },{"total-serialism":47}],67:[function(require,module,exports){
 module.exports={
 	"uptempo" : 10,
@@ -17120,7 +17131,7 @@ module.exports={
 const Tone = require('tone');
 const Mercury = require('mercury-lang');
 const TL = require('total-serialism').Translate;
-const Util = require('total-serialism').Utility;
+const { normalize, multiply } = require('total-serialism').Utility;
 
 const MonoSample = require('./core/MonoSample.js');
 const MonoMidi = require('./core/MonoMidi.js');
@@ -17129,6 +17140,7 @@ const MonoInput = require('./core/MonoInput.js');
 const PolySynth = require('./core/PolySynth.js');
 const PolySample = require('./core/PolySample.js');
 const Tempos = require('./data/genre-tempos.json');
+const Util = require('./core/Util.js');
 
 class MercuryInterpreter {
 	constructor({ hydra, p5canvas } = {}){
@@ -17189,7 +17201,7 @@ class MercuryInterpreter {
 	setCrossFade(f){
 		// set the crossFade in milliseconds
 		this.crossFade = Number(f) / 1000;
-		this.log(`Crossfade set to: ${f}ms`);
+		Util.log(`Crossfade set to: ${f}ms`);
 	}
 
 	getCode(){
@@ -17220,19 +17232,19 @@ class MercuryInterpreter {
 		// l.innerHTML = '';
 		// handle .print and .errors
 		this.errors.forEach((e) => {
-			this.log(e);
+			Util.log(e);
 		});
 		if (this.errors.length > 0){
 			// return if the code contains any syntax errors
-			this.log(`Could not run because of syntax error`);
-			this.log(`Please see Help for more information`);
+			Util.log(`Could not run because of syntax error`);
+			Util.log(`Please see Help for more information`);
 			return;
 		}
 		// if no errors the last evaluated code is stored
 		this._code = c;
 
 		this.tree.print.forEach((p) => {
-			this.log(p);
+			Util.log(p);
 		});
 
 		// set timer to check evaluation time
@@ -17249,7 +17261,7 @@ class MercuryInterpreter {
 				if (isNaN(t)){
 					t = Tempos[args[0].toLowerCase()];
 					if (t === undefined){
-						this.log(`tempo ${args[0]} is not a valid genre or number`);
+						Util.log(`tempo ${args[0]} is not a valid genre or number`);
 						return;
 					}
 					args[0] = t;
@@ -17279,7 +17291,7 @@ class MercuryInterpreter {
 				if (s.indexOf(scl) > -1){
 					TL.setScale(scl);
 				} else {
-					this.log(`${scl} is not a valid scale`);
+					Util.log(`${scl} is not a valid scale`);
 				}
 				if (rt){
 					TL.setRoot(rt);
@@ -17288,7 +17300,7 @@ class MercuryInterpreter {
 				let tmpS = TL.getScale().scale;
 				let tmpR = TL.getScale().root;
 				// document.getElementById('scale').innerHTML = `scale = ${tmpR} ${tmpS}`;
-				// this.log(`set scale to ${tmpR} ${tmpS}`);
+				// Util.log(`set scale to ${tmpR} ${tmpS}`);
 			},
 			'amp' : (args) => {
 				this.setVolume(...args);
@@ -17373,7 +17385,7 @@ class MercuryInterpreter {
 			if (objectMap[type]){
 				this.sounds.push(objectMap[type](this.tree.objects[o]));
 			} else {
-				this.log(`Instrument named '${type}' is not supported`);
+				Util.log(`Instrument named '${type}' is not supported`);
 			}
 		}
 
@@ -17403,7 +17415,7 @@ class MercuryInterpreter {
 			// handle .display to p5
 			tree.display.forEach((p) => {
 				// restart canvas if view is used
-				let n = Util.mul(Util.normalize(p), 255);
+				let n = multiply(normalize(p), 255);
 				this.p5canvas.sketch.fillCanvas(n);
 				this.p5canvas.display();
 			});
@@ -17411,7 +17423,7 @@ class MercuryInterpreter {
 	}
 }
 module.exports = { MercuryInterpreter }
-},{"./core/MonoInput.js":58,"./core/MonoMidi.js":59,"./core/MonoSample.js":60,"./core/MonoSynth.js":61,"./core/PolySample.js":63,"./core/PolySynth.js":64,"./data/genre-tempos.json":67,"mercury-lang":27,"tone":44,"total-serialism":47}],69:[function(require,module,exports){
+},{"./core/MonoInput.js":58,"./core/MonoMidi.js":59,"./core/MonoSample.js":60,"./core/MonoSynth.js":61,"./core/PolySample.js":63,"./core/PolySynth.js":64,"./core/Util.js":66,"./data/genre-tempos.json":67,"mercury-lang":27,"tone":44,"total-serialism":47}],69:[function(require,module,exports){
 
 console.log(`
 Mercury Engine by Timo Hoogland (c) 2023
@@ -17425,6 +17437,7 @@ Mercury Engine by Timo Hoogland (c) 2023
 
 const Tone = require('tone');
 const { MercuryInterpreter } = require('./interpreter');
+const Util = require('./core/Util.js');
 
 // load extra AudioWorkletProcessors from file
 // transformed to inline with browserify brfs
@@ -17484,13 +17497,6 @@ class Mercury extends MercuryInterpreter {
 		});
 	}
 
-	// the log message is used to log to the console but
-	// can be overwritten with a custom log message
-	// to also display logs from instruments in the html
-	log(msg){
-		console.log(msg);
-	}
-
 	// resume webaudio and transport
 	resume(){
 		try {
@@ -17500,7 +17506,7 @@ class Mercury extends MercuryInterpreter {
 				Tone.Transport.timeSignature = [4, 4];
 				// a bit latency on start for safety
 				Tone.Transport.start('+0.1');
-				console.log('Resumed Transport');
+				Util.log('Resumed Transport');
 			}
 		} catch {
 			console.error('Error starting Transport');
@@ -17514,7 +17520,7 @@ class Mercury extends MercuryInterpreter {
 			this.removeSounds(this.sounds, 0.1);
 			// Stops instead of pause so restarts at 0
 			Tone.Transport.stop();
-			console.log('Stopped Transport');
+			Util.log('Stopped Transport');
 		} catch {
 			console.error('Error stopping Transport');
 		}
@@ -17584,7 +17590,7 @@ class Mercury extends MercuryInterpreter {
 
 		// add to ToneAudioBuffers
 		this.buffers.add(n, url, () => {
-			this.log(`sound added as: ${n}`);
+			Util.log(`sound added as: ${n}`);
 			URL.revokeObjectURL(url);
 
 			// also add soundfiles to menu for easy selection
@@ -17593,7 +17599,7 @@ class Mercury extends MercuryInterpreter {
 			// o.value = o.innerHTML = n;
 			// m.appendChild(o);
 		}, (e) => {
-			this.log(`error adding sound from: ${n}`);
+			Util.log(`error adding sound from: ${n}`);
 		});
 	}
 
@@ -17683,7 +17689,7 @@ class Mercury extends MercuryInterpreter {
 				anchor.click();
 			}
 		} catch(e) {
-			this.log(`Error starting/stopping recording ${e}`);
+			Util.log(`Error starting/stopping recording ${e}`);
 		}
 	}
 
@@ -17693,5 +17699,5 @@ class Mercury extends MercuryInterpreter {
 	}
 }
 module.exports = { Mercury };
-},{"./interpreter":68,"tone":44}]},{},[69])(69)
+},{"./core/Util.js":66,"./interpreter":68,"tone":44}]},{},[69])(69)
 });

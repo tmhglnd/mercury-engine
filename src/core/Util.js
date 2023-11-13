@@ -50,7 +50,7 @@ function getOSC(a){
 		return a;
 	} else if (osc.match(/^\/[^`'"\s]+/g)){
 		if (!window.oscMessages[osc]){
-			console.log(`No message received on address ${osc}`);
+			log(`No message received on address ${osc}`);
 			return [0];
 		}
 		return window.oscMessages[osc];
@@ -83,7 +83,7 @@ function evalExpr(a){
 		try {
 			result = eval(expr);
 		} catch (e){
-			console.log(`Unable to evaluate expression: ${expr}`);
+			log(`Unable to evaluate expression: ${expr}`);
 		}
 		return result;
 	}
@@ -108,8 +108,7 @@ function formatRatio(d, bpm){
 	} else if (!isNaN(Number(d))){
 		return Number(d) * 4.0 * 60 / bpm;
 	} else {
-		// print(`${d} is not a valid time value`);
-		console.log(`${d} is not a valid time value`);
+		log(`${d} is not a valid time value`);
 		return 60 / bpm;
 	}
 }
@@ -121,7 +120,7 @@ function divToS(d, bpm){
 	} else if (!isNaN(Number(d))){
 		return Number(d) / 1000;
 	} else {
-		console.log(`${d} is not a valid time value`);
+		log(`${d} is not a valid time value`);
 		return 0.1;
 	}
 }
@@ -131,7 +130,7 @@ function noteToFreq(i, o){
 	if (isNaN(i)){
 		let _i = noteToMidi(i);
 		if (!_i){
-			console.log(`${i} is not a valid number or name`);
+			log(`${i} is not a valid number or name`);
 			i = 0;
 		} else {
 			i = _i - 48;
@@ -162,7 +161,7 @@ function assureWave(w){
 	if (waveMap[w]){
 		w = waveMap[w];
 	} else {
-		console.log(`${w} is not a valid waveshape`);
+		log(`${w} is not a valid waveshape`);
 		// default wave if wave does not exist
 		w = 'sine';
 	}
@@ -174,7 +173,7 @@ function toMidi(n=0, o=0){
 	if (isNaN(n)){
 		let _n = noteToMidi(n);
 		if (!_n){
-			console.log(`${n} is not a valid number or name`);
+			log(`${n} is not a valid number or name`);
 			n = 0;
 		} else {
 			n = _n - 36;
@@ -183,4 +182,15 @@ function toMidi(n=0, o=0){
 	return toScale(n + o * 12 + 36);
 }
 
-module.exports = { clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, toMidi, mtof, noteToMidi, noteToFreq, assureWave }
+// the log message is used to log to the console but also
+// sends a custom event that can be listened for to print the 
+// content at some other place in the window, for example using a div
+function log(msg){
+	console.log(msg);
+	if (window){
+		let print = new CustomEvent('mercuryLog', { detail: msg });
+		window.dispatchEvent(print);
+	}
+}
+
+module.exports = { clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }

@@ -188,7 +188,7 @@ class Instrument extends Sequencer {
 				let tmpF = fxMap[f[0]](f.slice(1));
 				this._fx.push(tmpF);
 			} else {
-				log(`Effect ${f[0]} does not exist`);
+				Util.log(`Effect ${f[0]} does not exist`);
 			}
 		});
 		// if any fx working

@@ -313,7 +313,7 @@ const LFO = function(_params){
 		if (this._waveMap[w]){
 			w = this._waveMap[w];
 		} else {
-			console.log(`'${w} is not a valid waveshape`);
+			Util.log(`'${w} is not a valid waveshape`);
 			// default wave if wave does not exist
 			w = 'sine';
 		}
@@ -362,7 +362,7 @@ const Filter = function(_params){
 	if (this._types[_params[0]]){
 		this._fx.set({ type: this._types[_params[0]] });
 	} else {
-		console.log(`'${_params[0]}' is not a valid filter type`);
+		Util.log(`'${_params[0]}' is not a valid filter type`);
 		this._fx.set({ type: 'lowpass' });
 	}
 	this._fx.set({ rolloff: -24 });
@@ -436,7 +436,7 @@ const TriggerFilter = function(_params){
 	if (this._types[_params[0][0]]){
 		this._fx.set({ type: this._types[_params[0][0]] });
 	} else {
-		console.log(`'${_params[0][0]}' is not a valid filter type. Defaulting to lowpass`);
+		Util.log(`'${_params[0][0]}' is not a valid filter type. Defaulting to lowpass`);
 		this._fx.set({ type: 'lowpass' });
 	}
 

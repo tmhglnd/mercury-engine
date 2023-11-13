@@ -105,7 +105,7 @@ class MonoSample extends Instrument {
 			// error if soundfile does not exist
 			else if (!this._bufs.has(s)){
 				// set default (or an ampty soundfile?)
-				console.log(`sample ${s} not found`);
+				Util.log(`sample ${s} not found`);
 				return 'kick_909';
 			}
 			return s;

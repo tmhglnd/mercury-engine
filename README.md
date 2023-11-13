@@ -116,6 +116,20 @@ Return the last succesfully evaluated code. If code is evaluated that resulted i
 Engine.getCode();
 ```
 
+### Samples
+
+Add your own samples from for example a url like raw github or freesound. The url can also contain a .json file that references multiple samples and the sample name.
+
+```js
+Engine.addBuffers();
+```
+
+Get the content of all the loaded Buffers, this is returned as a ToneAudioBuffers class
+
+```js
+Engine.getBuffers();
+```
+
 ### Recording
 
 Start the recording of the sound
@@ -184,29 +198,16 @@ console.log(Engine.highPass);
 console.log(Engine.lowPass);
 ```
 
-### Samples
+### Log function listener
 
-Add your own samples from for example a url like raw github or freesound. The url can also contain a .json file that references multiple samples and the sample name.
-
-```js
-Engine.addBuffers();
-```
-
-Get the content of all the loaded Buffers, this is returned as a ToneAudioBuffers class
+Logs that are important for the Mercury coder are also emitted as a custom event in the browser. You can create an event listener for `mercuryLog`. The `e.detail` contains the printed message. This can be used to for example print things to custom html elements instead of the javascript console.
 
 ```js
-Engine.getBuffers();
-```
-
-### Customized log function
-
-Replace the log() function in the engine for a custom log fuction to for example display errors in HTML elements
-
-```js
-Engine.log = (print) => {
-	let p = JSON.stringify(print).replace(/\,/g, ' ').replace(/\"/g, '');
-	document.getElementById('log-div').innerHTML += `${p}<br>`;
-}
+window.addEventListener('mercuryLog', (e) => {
+	let p = JSON.stringify(e.detail).replace(/\,/g, ' ').replace(/\"/g, '');
+	document.getElementById('logger').innerHTML += `${p}<br>`;
+	console.log('customprint:', e.detail);
+});
 ```
 
 ## 📋 To Do

@@ -132,7 +132,7 @@ class PolyInstrument extends Instrument {
 	}
 
 	voices(v){
-		console.log(`Changing voice amount is not yet supported. You can use voice-stealing with steal(on)`);
+		Util.log(`Changing voice amount is not yet supported. You can use voice-stealing with steal(on)`);
 		// TODO change voice amount
 		// set the voiceamount for the polyphonic synth
 		// this.numVoices = Math.max(1, isNaN(Number(v))? 6 : Number(v));
@@ -147,7 +147,7 @@ class PolyInstrument extends Instrument {
 		} else if (s === 'off' || s == 0){
 			this._steal = false;
 		} else {
-			console.log(`${s} is not a valid argument for steal()`);
+			Util.log(`${s} is not a valid argument for steal()`);
 		}
 	}
 

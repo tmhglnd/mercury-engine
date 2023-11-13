@@ -11,6 +11,7 @@ Mercury Engine by Timo Hoogland (c) 2023
 
 const Tone = require('tone');
 const { MercuryInterpreter } = require('./interpreter');
+const Util = require('./core/Util.js');
 
 // load extra AudioWorkletProcessors from file
 // transformed to inline with browserify brfs
@@ -70,13 +71,6 @@ class Mercury extends MercuryInterpreter {
 		});
 	}
 
-	// the log message is used to log to the console but
-	// can be overwritten with a custom log message
-	// to also display logs from instruments in the html
-	log(msg){
-		console.log(msg);
-	}
-
 	// resume webaudio and transport
 	resume(){
 		try {
@@ -86,7 +80,7 @@ class Mercury extends MercuryInterpreter {
 				Tone.Transport.timeSignature = [4, 4];
 				// a bit latency on start for safety
 				Tone.Transport.start('+0.1');
-				console.log('Resumed Transport');
+				Util.log('Resumed Transport');
 			}
 		} catch {
 			console.error('Error starting Transport');
@@ -100,7 +94,7 @@ class Mercury extends MercuryInterpreter {
 			this.removeSounds(this.sounds, 0.1);
 			// Stops instead of pause so restarts at 0
 			Tone.Transport.stop();
-			console.log('Stopped Transport');
+			Util.log('Stopped Transport');
 		} catch {
 			console.error('Error stopping Transport');
 		}
@@ -170,7 +164,7 @@ class Mercury extends MercuryInterpreter {
 
 		// add to ToneAudioBuffers
 		this.buffers.add(n, url, () => {
-			this.log(`sound added as: ${n}`);
+			Util.log(`sound added as: ${n}`);
 			URL.revokeObjectURL(url);
 
 			// also add soundfiles to menu for easy selection
@@ -179,7 +173,7 @@ class Mercury extends MercuryInterpreter {
 			// o.value = o.innerHTML = n;
 			// m.appendChild(o);
 		}, (e) => {
-			this.log(`error adding sound from: ${n}`);
+			Util.log(`error adding sound from: ${n}`);
 		});
 	}
 
@@ -269,7 +263,7 @@ class Mercury extends MercuryInterpreter {
 				anchor.click();
 			}
 		} catch(e) {
-			this.log(`Error starting/stopping recording ${e}`);
+			Util.log(`Error starting/stopping recording ${e}`);
 		}
 	}
 

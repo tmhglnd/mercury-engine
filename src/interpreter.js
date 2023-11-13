@@ -2,7 +2,7 @@
 const Tone = require('tone');
 const Mercury = require('mercury-lang');
 const TL = require('total-serialism').Translate;
-const Util = require('total-serialism').Utility;
+const { normalize, multiply } = require('total-serialism').Utility;
 
 const MonoSample = require('./core/MonoSample.js');
 const MonoMidi = require('./core/MonoMidi.js');
@@ -11,6 +11,7 @@ const MonoInput = require('./core/MonoInput.js');
 const PolySynth = require('./core/PolySynth.js');
 const PolySample = require('./core/PolySample.js');
 const Tempos = require('./data/genre-tempos.json');
+const Util = require('./core/Util.js');
 
 class MercuryInterpreter {
 	constructor({ hydra, p5canvas } = {}){
@@ -71,7 +72,7 @@ class MercuryInterpreter {
 	setCrossFade(f){
 		// set the crossFade in milliseconds
 		this.crossFade = Number(f) / 1000;
-		this.log(`Crossfade set to: ${f}ms`);
+		Util.log(`Crossfade set to: ${f}ms`);
 	}
 
 	getCode(){
@@ -102,19 +103,19 @@ class MercuryInterpreter {
 		// l.innerHTML = '';
 		// handle .print and .errors
 		this.errors.forEach((e) => {
-			this.log(e);
+			Util.log(e);
 		});
 		if (this.errors.length > 0){
 			// return if the code contains any syntax errors
-			this.log(`Could not run because of syntax error`);
-			this.log(`Please see Help for more information`);
+			Util.log(`Could not run because of syntax error`);
+			Util.log(`Please see Help for more information`);
 			return;
 		}
 		// if no errors the last evaluated code is stored
 		this._code = c;
 
 		this.tree.print.forEach((p) => {
-			this.log(p);
+			Util.log(p);
 		});
 
 		// set timer to check evaluation time
@@ -131,7 +132,7 @@ class MercuryInterpreter {
 				if (isNaN(t)){
 					t = Tempos[args[0].toLowerCase()];
 					if (t === undefined){
-						this.log(`tempo ${args[0]} is not a valid genre or number`);
+						Util.log(`tempo ${args[0]} is not a valid genre or number`);
 						return;
 					}
 					args[0] = t;
@@ -161,7 +162,7 @@ class MercuryInterpreter {
 				if (s.indexOf(scl) > -1){
 					TL.setScale(scl);
 				} else {
-					this.log(`${scl} is not a valid scale`);
+					Util.log(`${scl} is not a valid scale`);
 				}
 				if (rt){
 					TL.setRoot(rt);
@@ -170,7 +171,7 @@ class MercuryInterpreter {
 				let tmpS = TL.getScale().scale;
 				let tmpR = TL.getScale().root;
 				// document.getElementById('scale').innerHTML = `scale = ${tmpR} ${tmpS}`;
-				// this.log(`set scale to ${tmpR} ${tmpS}`);
+				// Util.log(`set scale to ${tmpR} ${tmpS}`);
 			},
 			'amp' : (args) => {
 				this.setVolume(...args);
@@ -255,7 +256,7 @@ class MercuryInterpreter {
 			if (objectMap[type]){
 				this.sounds.push(objectMap[type](this.tree.objects[o]));
 			} else {
-				this.log(`Instrument named '${type}' is not supported`);
+				Util.log(`Instrument named '${type}' is not supported`);
 			}
 		}
 
@@ -285,7 +286,7 @@ class MercuryInterpreter {
 			// handle .display to p5
 			tree.display.forEach((p) => {
 				// restart canvas if view is used
-				let n = Util.mul(Util.normalize(p), 255);
+				let n = multiply(normalize(p), 255);
 				this.p5canvas.sketch.fillCanvas(n);
 				this.p5canvas.display();
 			});
