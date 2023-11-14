@@ -159,20 +159,23 @@ class Mercury extends MercuryInterpreter {
 
 	// add files to the buffer from a single File Link
 	// an array or file paths, or a json of { name:file, ... }
-	async addBuffers(uploads){
+	addBuffers(uploads){
+		// make sure uploades is an array to iterate over
+		uploads = Array.isArray(uploads)? uploads : [uploads];
+
 		// for every file from uploads
-		uploads.forEach((f) => {
-			let n = f;
-			let url = f;
-			if (f.name){
+		uploads.forEach((file) => {
+			let n = file;
+			let url = file;
+			if (file.name){
 				// get the filename from File object
-				n = f.name;
-				url = URL.createObjectURL(f);
+				n = file.name;
+				url = URL.createObjectURL(file);
 			}
-			if (Array.isArray(f)){
+			if (Array.isArray(file)){
 				// if array use first value as the name
-				n = f[0];
-				url = f[1];
+				n = file[0];
+				url = file[1];
 			}
 			if (n.endsWith('.json')){
 				// read from json if loaded is a json file
