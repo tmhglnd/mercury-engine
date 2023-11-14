@@ -59,10 +59,15 @@ class Mercury extends MercuryInterpreter {
 		this.setLowPass(5);
 		this.setCrossFade(250);
 
+		// get the base url and add to the sample locations
+		this.baseUrl = this.samples['_base'];
+		delete this.samples['_base'];
+		Object.keys(this.samples).forEach((s) => {
+			this.samples[s] = this.baseUrl + this.samples[s];
+		});
 		// load the buffers from the github
 		this.buffers = new Tone.ToneAudioBuffers({
 			urls: this.samples,
-			baseUrl: "https://raw.githubusercontent.com/tmhglnd/mercury-playground/main/public/assets/samples/",
 			onload: () => {
 				console.log('Samples loaded', this.buffers);
 				// executes a callback from the class constructor

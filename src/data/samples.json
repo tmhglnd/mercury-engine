@@ -1,4 +1,5 @@
 {
+  "_base": "https://raw.githubusercontent.com/tmhglnd/mercury-playground/main/public/assets/samples/",
   "noise_a": "noise/noise_a.wav",
   "drone_cymbal": "ambient/cymbal/drone_cymbal.wav",
   "drone_cymbal_01": "ambient/cymbal/drone_cymbal_01.wav",
