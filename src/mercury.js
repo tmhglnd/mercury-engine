@@ -10,8 +10,9 @@ Mercury Engine by Timo Hoogland (c) 2023
 `);
 
 const Tone = require('tone');
-const { MercuryInterpreter } = require('./interpreter');
 const Util = require('./core/Util.js');
+const { MercuryInterpreter } = require('./interpreter');
+const { WebMidi } = require("webmidi");
 
 // load extra AudioWorkletProcessors from file
 // transformed to inline with browserify brfs
@@ -23,7 +24,7 @@ Tone.getContext().addAudioWorkletModule(URL.createObjectURL(new Blob([ fxExtensi
 // also has the interpreter evaluating the code and adding the instruments
 // 
 class Mercury extends MercuryInterpreter {
-	constructor({ onload, hydra, p5canvas } = {}){
+	constructor({ onload, onmidi, hydra, p5canvas } = {}){
 		// initalize the constructor of inheriting class with 
 		// optionally a hydra and p5 canvas
 		super({ hydra, p5canvas });
@@ -69,6 +70,36 @@ class Mercury extends MercuryInterpreter {
 				if (onload){ onload(); }
 			}
 		});
+
+		// the midi status, inputs and outputs
+		this.midi = { enabled: false, inputs: [], outputs: [] };
+
+		// WebMIDI Setup if supported by the browser
+		// Else `midi` not supported in the Mercury code
+		WebMidi.enable((error) => {
+			if (error) {
+				console.error(`WebMIDI not enabled: ${error}`);
+			} else {
+				this.midi.enabled = true;
+
+				console.log(`WebMIDI enabled`);
+				if (WebMidi.inputs.length < 1){
+					console.log(`No MIDI device detected`);
+				} else {
+					this.midi.inputs = WebMidi.inputs;
+					this.midi.outputs = WebMidi.outputs;
+					
+					WebMidi.inputs.forEach((device, index) => {
+						console.log(`in ${index}: ${device.name}`);
+					});
+					WebMidi.outputs.forEach((device, index) => {
+						console.log(`out ${index}: ${device.name}`);
+					});
+				}
+				// execute a callback when midi is loaded if provided
+				if (onmidi) { onmidi(); }
+			}
+		});
 	}
 
 	// resume webaudio and transport
@@ -80,7 +111,7 @@ class Mercury extends MercuryInterpreter {
 				Tone.Transport.timeSignature = [4, 4];
 				// a bit latency on start for safety
 				Tone.Transport.start('+0.1');
-				Util.log('Resumed Transport');
+				console.log('Resumed Transport');
 			}
 		} catch {
 			console.error('Error starting Transport');
@@ -94,7 +125,7 @@ class Mercury extends MercuryInterpreter {
 			this.removeSounds(this.sounds, 0.1);
 			// Stops instead of pause so restarts at 0
 			Tone.Transport.stop();
-			Util.log('Stopped Transport');
+			console.log('Stopped Transport');
 		} catch {
 			console.error('Error stopping Transport');
 		}

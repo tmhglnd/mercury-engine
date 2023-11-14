@@ -75,7 +75,7 @@ Include the package
 const { Mercury } = require('mercury-engine');
 ```
 
-Initialize the engine and include a callback function through { onload: }
+Initialize the engine and include a callback function through { onload: }, this will be executed when samples are loaded.
 
 ```js
 const Engine = Mercury({
@@ -148,6 +148,20 @@ Stop the recording and download the file `myRecording.webm`
 
 ```js
 Engine.record(false, 'myRecording');
+```
+
+### MIDI
+
+WebMIDI is included and started if the browser is compatible with it. If not, an error will be printed to the console. You can provide a callback function `onmidi` to execute some code when the WebMIDI enabling was succesful.
+
+```js
+const Engine = Mercury({
+	onmidi: () => {
+		console.log('The WebMIDI status is:', Engine.midi.status);
+		console.log('With inputs:', Engine.midi.inputs);
+		console.log('And outputs:', Engine.midi.outputs);
+	}
+});
 ```
 
 ### Settings

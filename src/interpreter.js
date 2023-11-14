@@ -56,17 +56,24 @@ class MercuryInterpreter {
 	startSounds(s, f=0){
 		// fade in new sounds
 		s.map((_s) => {
-			_s.fadeIn(f);
+			if (_s){ _s.fadeIn(f); }
 		});
 	}
 	
 	removeSounds(s, f=0) {
 		// fade out and delete after fade
 		s.map((_s) => {
-			_s.fadeOut(f);
+			if (_s){ _s.fadeOut(f); }
 		});
 		// empty array to trigger garbage collection
 		s.length = 0;
+	}
+
+	makeLoops(s){
+		// make the loops for all the instruments
+		s.map((_s) => {
+			if (_s){ _s.makeLoop(); }
+		});
 	}
 
 	setCrossFade(f){
@@ -167,9 +174,8 @@ class MercuryInterpreter {
 				if (rt){
 					TL.setRoot(rt);
 				}
-	
-				let tmpS = TL.getScale().scale;
-				let tmpR = TL.getScale().root;
+				// let tmpS = TL.getScale().scale;
+				// let tmpR = TL.getScale().root;
 				// document.getElementById('scale').innerHTML = `scale = ${tmpR} ${tmpS}`;
 				// Util.log(`set scale to ${tmpR} ${tmpS}`);
 			},
@@ -216,6 +222,10 @@ class MercuryInterpreter {
 				return inst;
 			},
 			'midi' : (obj) => {
+				if (!this.midi.enabled){
+					Util.log(`WebMIDI is not started. Please load the package and check your browser compatibility`);
+					return null;
+				}
 				let inst = new MonoMidi(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
@@ -261,13 +271,10 @@ class MercuryInterpreter {
 		}
 
 		// start new loops;
-		this.sounds.map((s) => {
-			s.makeLoop();
-		});
-
-		console.log(`Instruments added in: ${((Tone.Transport.seconds - t) * 1000).toFixed(3)}ms`);
-		
+		this.makeLoops(this.sounds);
 		this.transferCounts(this._sounds, this.sounds);
+
+		console.log(`Instruments added in: ${((Tone.Transport.seconds - t) * 1000).toFixed(3)}ms`);		
 		
 		// when all loops started fade in the new sounds and fade out old
 		if (!this.sounds.length){

@@ -1,7 +1,7 @@
 const Tone = require('tone');
 const Util = require('./Util.js');
 const Sequencer = require('./Sequencer.js');
-const WebMidi = require("webmidi");
+const { WebMidi } = require("webmidi");
 
 class MonoMidi extends Sequencer {
 	constructor(engine, d='default', canvas){
@@ -79,8 +79,8 @@ class MonoMidi extends Sequencer {
 			n[x] = Util.toMidi(i[x], o);
 		}
 		
-		// play the note(s)!
-		this._device.playNote(n, ch, { duration: d, velocity: g, time: sync });
+		// play the note(s)! updated for webmidi 3.x
+		this._device.playNote(n, ch, { duration: d, attack: g, time: sync });
 
 		// }
 	}
