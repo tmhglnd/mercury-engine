@@ -128,6 +128,21 @@ Add your own samples from for example a url like raw github or freesound. The ur
 Engine.addBuffers();
 ```
 
+For example use a json file containing sample names and urls
+
+```js
+Engine.addBuffers('https://raw.githubusercontent.com/tmhglnd/mercury-engine/main/examples/samples/freesound-samples.json');
+```
+
+Or load samples directly by creating an array of urls
+
+```js
+let s1 = 'https://cdn.freesound.org/previews/671/671221_3797507-lq.mp3';
+let s2 = 'https://cdn.freesound.org/previews/145/145778_2101444-lq.mp3';
+
+Engine.addBuffers([s1, s2]);
+```
+
 Get the content of all the loaded Buffers, this is returned as a ToneAudioBuffers class
 
 ```js
