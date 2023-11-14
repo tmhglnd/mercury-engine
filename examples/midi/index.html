@@ -5,10 +5,10 @@
 	<title>MIDI Output Example</title>
 
 	<!-- Use the latest minified es5 distribution -->
-	<script src="https://unpkg.com/mercury-engine/dist/mercury.min.es5.js"></script>
+	<!-- <script src="https://unpkg.com/mercury-engine/dist/mercury.min.es5.js"></script> -->
 
 	<!-- from local while developing -->
-	<!-- <script src="./../../dist/mercury.js"></script> -->
+	<script src="./../../dist/mercury.js"></script>
 </head>
 
 <body>
@@ -17,64 +17,47 @@
 	</p>
 
 	<!-- 2 buttons in the html page -->
-	<div id="midi-status"></div>
 	<button id="b1">start</button>
 	<button id="b2">silence</button>
 
+	<p id="midi-status" style="font-family: arial;"></div>
+
 	<script>
-		// This script loads the Mercury Engine and allows to insert code
-		// from a textarea in the html page
+		// This script loads the Mercury Engine. When you click start it
+		// evaluates some code that sends midinotes to the default output.
+		// Available outputs are listed on the html page and printed in 
+		// the console.
 
 		// Include the package from unpkg.com
 		const { Mercury } = MercuryEngine;
-		// const { OSC } = MercuryEngine;
-		// const { MIDI } = MercuryEngine;
 
-		// Initialize a Mercury engine with callback function when loaded
+		// Some mercury code to be evaluated on button click
+		const midiCode = `
+			set tempo 100
+			set scale major c
+			new midi default time(1/1) chord(on) note(chordsFromNumerals(I IV V VIm) 1) length(1/2)
+			new midi default time(1/8) note(random(16 12) 2) length(1/16)
+		`
+
+		// Initialize a Mercury engine with callback function when midi loaded
 		const Engine = new Mercury({
-			onload: () => {
-				console.log('The engine and sounds are loaded!');
+			onmidi: () => {
+				// display the midi status, inputs and outputs in the html
+				let t = document.getElementById('midi-status');
+				t.innerHTML += `MIDI is enabled: ${Engine.midi.enabled}<br>`;
 
-				// set the volume to 0.7, about -3dBFS
-				Engine.setVolume(0.7);
-				// generate a random BPM
-				Engine.randomBPM();
-				// set the crossfade from previous and new evaluated code to 250 ms
-				Engine.setCrossFade(1000);
-
-				console.log('BPM:', Engine.bpm);
-				console.log('Volume:', Engine.volume);
-				console.log('CrossFade:', Engine.crossFade);
-				console.log('LowPass:', Engine.lowPass);
-				console.log('HighPass:', Engine.highPass);
+				Engine.midi.inputs.forEach((d, i) => {
+					t.innerHTML += `<br>in ${i}: ${d.name}`;
+				});
+				Engine.midi.outputs.forEach((d, i) => {
+					t.innerHTML += `<br>out ${i}: ${d.name}`;
+				});
 			}
 		});
 
-		// console.log(this.getBPM());
-
-		// Some mercury code initially created
-		const simpleCode = `
-			set tempo 110
-			set randomSeed 4831
-			set scale dorian d
-
-			list progression chordsFromNumerals([I7 IIIm7 IV7 V7])
-			new polySynth saw name(chrd)
-				set chrd note(progression 1) time(2/1) shape(1 2/1) fx(triggerFilter low 1/1 1/1 4000 100) super(0.132 3)
-
-			list melody add(repeat(flat(progression) 2) [0 12])
-			new polySynth saw name(lead)
-				set lead note(melody 2) time(1/8) shape(1 2/1) super(0.112 3) gain(0.6) fx(triggerFilter low 1 1/6 5000 100) 
-			
-			set all fx(squash 1) fx(reverb 0.4 7)
-
-			list drums choose(17 [hat_808 kick_808 snare_808])
-			new sample drums time(1/8) gain(0.7) fx(degrade 0.7) fx(delay 3/16 5/16 0.9) timediv([1 1 1 2])
-		`
-
 		// evaluate the code on the click of a button
 		let b1 = document.getElementById('b1');
-		b1.onclick = () => Engine.code(simpleCode);
+		b1.onclick = () => Engine.code(midiCode);
 
 		// stop the code on the click of a button
 		let b2 = document.getElementById('b2');
