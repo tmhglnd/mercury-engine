@@ -2,13 +2,13 @@
 <html>
 
 <head>
-	<title>Mercury Engine Example</title>
+	<title>Mercury Basic Example</title>
 
 	<!-- Use the latest minified es5 distribution -->
-	<script src="https://unpkg.com/mercury-engine/dist/mercury.min.es5.js"></script>
+	<!-- <script src="https://unpkg.com/mercury-engine/dist/mercury.min.es5.js"></script> -->
 
 	<!-- from local while developing -->
-	<!-- <script src="./../../dist/mercury.js"></script> -->
+	<script src="./../../dist/mercury.js"></script>
 </head>
 
 <body>
@@ -20,36 +20,37 @@
 	<button id="b1">start</button>
 	<button id="b2">silence</button>
 
+	<p id="engine-status" style="font-family: 'arial';"></div>
+
 	<script>
 		// This script loads the Mercury Engine and allows to insert code
 		// from a textarea in the html page
 
 		// Include the package from unpkg.com
 		const { Mercury } = MercuryEngine;
-		// const { OSC } = MercuryEngine;
-		// const { MIDI } = MercuryEngine;
 
 		// Initialize a Mercury engine with callback function when loaded
 		const Engine = new Mercury({
 			onload: () => {
 				console.log('The engine and sounds are loaded!');
-
-				// set the volume to 0.7, about -3dBFS
-				Engine.setVolume(0.7);
-				// generate a random BPM
-				Engine.randomBPM();
-				// set the crossfade from previous and new evaluated code to 250 ms
-				Engine.setCrossFade(1000);
-
-				console.log('BPM:', Engine.bpm);
-				console.log('Volume:', Engine.volume);
-				console.log('CrossFade:', Engine.crossFade);
-				console.log('LowPass:', Engine.lowPass);
-				console.log('HighPass:', Engine.highPass);
 			}
 		});
 
-		// console.log(this.getBPM());
+		// set the volume to 0.7, about -3dBFS
+		Engine.setVolume(0.7);
+		// generate a random BPM
+		Engine.randomBPM();
+		// set the crossfade from previous and new evaluated code to 250 ms
+		Engine.setCrossFade(1000);
+
+		// display the engine settings in the html
+		let t = document.getElementById('engine-status');
+
+		t.innerHTML += `BPM: ${Engine.bpm}<br>`;
+		t.innerHTML += `Volume: ${Engine.volume}<br>`;
+		t.innerHTML += `CrossFade: ${Engine.crossFade}<br>`;
+		t.innerHTML += `LowPass: ${Engine.lowPass}<br>`;
+		t.innerHTML += `HighPass: ${Engine.highPass}<br>`;
 
 		// Some mercury code initially created
 		const simpleCode = `
