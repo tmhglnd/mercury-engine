@@ -65,6 +65,10 @@ const { Mercury } = MercuryEngine;
 const Engine = new Mercury();
 ```
 
+## Examples
+
+See the `examples` folder for a few `.html` files that demonstrate the usage. Run them locally by cloning this repository with `git clone https://github.com/tmhglnd/mercury-engine`. Then `cd mercury-engine` and run a simple http-server, for example with the `http-server` node package (install globally with `npm i -g http-server`). Navigate to `localhost:8080/examples` and try them out.
+
 # Usage
 
 ### Include and initialize
