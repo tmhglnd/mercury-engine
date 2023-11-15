@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<title>Controlling Mercury with an Interface</title>
+
+	<!-- Use the latest minified es5 distribution -->
+	<!-- <script src="https://unpkg.com/mercury-engine/dist/mercury.min.es5.js"></script> -->
+
+	<!-- from local while developing -->
+	<script src="./../../dist/mercury.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.8.0/p5.js"></script>
+</head>
+
+<body>
+	<p style="font-family: 'arial';">
+		This example demonstrates how to for example use P5js DOM elements (like sliders) to control parameters in Mercury synths/samples. This can be interesting to create user interaction with the music you code.
+	</p>
+
+	<!-- 2 buttons in the html page -->
+	<button id="b1">start</button>
+	<button id="b2">silence</button>
+
+	<p id="sample-status" style="font-family: 'arial';"></p>
+
+	<script>
+		// This script loads the Mercury Engine and allows to insert code
+		// from a textarea in the html page
+
+		// Include the package from unpkg.com
+		const { Mercury } = MercuryEngine;
+
+		// Initialize a Mercury engine with callback function when loaded
+		const Engine = new Mercury({
+			onload: () => {
+				console.log('The engine and sounds are loaded!');
+			}
+		});
+
+		// create variables for the various sliders
+		let cutoff;
+		let note;
+		let squash;
+		let detune;
+
+		// initialize the sliders with specific ranges
+		// use noCanvas() because we're not planning on drawing anything
+		function setup() {
+			noCanvas();
+			cutoff = createSlider(50, 5000, 200, 0);
+			note = createSlider(-12, 12, 0, 1);
+			degrade = createSlider(0, 1, 0.5, 0);
+			detune = createSlider(0, 1, 0, 0);
+			
+			cutoff.style('width', '50%');
+			note.style('width', '50%');
+			degrade.style('width', '50%');
+			detune.style('width', '50%');
+		}
+
+		// The Mercury code asks for the `.value()` from the sliders 
+		// in the parameter functions
+		const sampleCode = `
+			set tempo 130
+			new synth saw note('{note.value()}' 0) slide(1/16) fx(filter low '{cutoff.value()}' 0.4 1/16) super('{detune.value()}' 3)  shape(off) time(1/16) fx(degrade '{degrade.value()}')
+		`
+
+		// evaluate the code on the click of a button
+		let b1 = document.getElementById('b1');
+		b1.onclick = () => Engine.code(sampleCode);
+
+		// stop the code on the click of a button
+		let b2 = document.getElementById('b2');
+		b2.onclick = () => Engine.silence();
+	</script>
+</body>
+
+</html>
