@@ -163,6 +163,11 @@ class Mercury extends MercuryInterpreter {
 		// make sure uploades is an array to iterate over
 		uploads = Array.isArray(uploads)? uploads : [uploads];
 
+		// let promise = new Promise((resolve) => {
+		// 	return resolve(Mercury(c));
+		// });
+		// Promise.all([])
+
 		// for every file from uploads
 		uploads.forEach((file) => {
 			let n = file;

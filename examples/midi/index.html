@@ -48,7 +48,7 @@
 		});
 
 		// Some mercury code to be evaluated on button click
-		const midiCode = `
+		const mercuryCode = `
 			set tempo 100
 			set scale major c
 			new midi default time(1/1) chord(on) note(chordsFromNumerals(I IV V VIm) 1) length(1/2)
@@ -57,7 +57,7 @@
 
 		// evaluate the code on the click of a button
 		let b1 = document.getElementById('b1');
-		b1.onclick = () => Engine.code(midiCode);
+		b1.onclick = () => Engine.code(mercuryCode);
 
 		// stop the code on the click of a button
 		let b2 = document.getElementById('b2');

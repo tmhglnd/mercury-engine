@@ -243,6 +243,24 @@ window.addEventListener('mercuryLog', (e) => {
 });
 ```
 
+### DOM elements from P5js
+
+It is possible to control parameters from instruments in the Mercury code by writing a string that contains `{}` with the js code inside to get the dom value. For example when using DOM elements from the P5js library, such as sliders, they can be used in the code.
+
+```js
+let slider;
+
+// p5js setup function
+function setup() {
+	noCanvas();
+	// create a slider with range 50 - 5000, initial 1000
+	slider = createSlider(50, 5000, 1000, 0);
+}
+
+// use the slider value as a cutoff frequency for the filter
+Engine.code(`new synth saw note(0 0) fx(filter low '{slider.value()}' 0.4)`);
+```
+
 ## 📋 To Do
 
 - [ ] Include OSC communcation options via socket.io
