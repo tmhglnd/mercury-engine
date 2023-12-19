@@ -17436,7 +17436,6 @@ console.log(`
 Mercury Engine by Timo Hoogland (c) 2023
 	more info:
 	https://www.timohoogland.com
-	https://mercury.timohoogland.com
 	https://github.com/tmhglnd/mercury-playground
 	https://github.com/tmhglnd/mercury-engine
 
@@ -17502,12 +17501,16 @@ class Mercury extends MercuryInterpreter {
 		this.buffers = new Tone.ToneAudioBuffers({
 			urls: this.samples,
 			onload: () => {
-				console.log('Samples loaded', this.buffers);
+				// console.log('Samples loaded', this.buffers);
 				// executes a callback from the class constructor
 				// if a callback is provided
 				if (onload){ onload(); }
 			}
 		});
+		// this.buffers = new Tone.ToneAudioBuffers();
+		// this.addBuffers('https://raw.githubusercontent.com/tmhglnd/mercury-engine/main/src/data/samples.json', () => {
+		// 	console.log('Samples loaded', this.buffers._buffers.keys());
+		// });
 
 		// the midi status, inputs and outputs
 		this.midi = { enabled: false, inputs: [], outputs: [] };
@@ -17592,14 +17595,12 @@ class Mercury extends MercuryInterpreter {
 
 	// add files to the buffer from a single File Link
 	// an array or file paths, or a json of { name:file, ... }
-	addBuffers(uploads){
+	// optional callback function called when all files are loaded
+	addBuffers(uploads, callback){
 		// make sure uploades is an array to iterate over
 		uploads = Array.isArray(uploads)? uploads : [uploads];
 
-		// let promise = new Promise((resolve) => {
-		// 	return resolve(Mercury(c));
-		// });
-		// Promise.all([])
+		let promises = [];
 
 		// for every file from uploads
 		uploads.forEach((file) => {
@@ -17617,11 +17618,15 @@ class Mercury extends MercuryInterpreter {
 			}
 			if (n.endsWith('.json')){
 				// read from json if loaded is a json file
-				this.addBufferFromJson(url);
+				promises.push(Promise.resolve(this.addBufferFromJson(url)));
 			} else {
 				// otherwise read the soundfile regularly
-				this.addBufferFromURL(url, n);
+				promises.push(Promise.resolve(this.addBufferFromURL(url, n)));
 			}
+		});
+
+		Promise.all(promises).then((values, reject) => {
+			if (callback) { callback(); }
 		});
 	}
 
@@ -17629,7 +17634,7 @@ class Mercury extends MercuryInterpreter {
 	// use the name as reference in the buffer
 	// if name is undefined it will be constructed from the URL
 	// 
-	addBufferFromURL(url, n){
+	async addBufferFromURL(url, n){
 		// get file name from url string
 		n = n.split('\\').pop().split('/').pop();
 		// remove extension 

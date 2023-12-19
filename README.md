@@ -85,6 +85,7 @@ Initialize the engine and include a callback function through { onload: }, this 
 const Engine = Mercury({
 	onload: () => {
 		console.log('This callback is called when samples are loaded!');
+		console.log('The loaded samples:', Engine.getBuffers());
 	}
 });
 ```
@@ -125,7 +126,7 @@ Engine.getCode();
 Add your own samples from for example a url like raw github or freesound. The url can also contain a .json file that references multiple samples and the sample name.
 
 ```js
-Engine.addBuffers();
+Engine.addBuffers(files, callback);
 ```
 
 For example use a json file containing sample names and urls
@@ -143,7 +144,16 @@ let s2 = 'https://cdn.freesound.org/previews/145/145778_2101444-lq.mp3';
 Engine.addBuffers([s1, s2]);
 ```
 
-Get the content of all the loaded Buffers, this is returned as a ToneAudioBuffers class
+Add a callback function, this is called when all samples are loaded
+
+```js
+Engine.addBuffers('https://someurl.json', () => {
+	console.log('This callback is called when samples are loaded!');
+	console.log('The loaded samples:', Engine.getBuffers());
+});
+```
+
+Get the content of all the loaded Buffers, this is returned as a `ToneAudioBuffers` class
 
 ```js
 Engine.getBuffers();
@@ -265,7 +275,6 @@ Engine.code(`new synth saw note(0 0) fx(filter low '{slider.value()}' 0.4)`);
 
 - [ ] Include OSC communcation options via socket.io
 - [ ] Use engine in the Mercury-playground instead of the other code-base
-- [ ] Allow control of parameters via DOM elements
 
 ## 🔋 Powered By
 

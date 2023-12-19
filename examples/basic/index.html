@@ -33,6 +33,7 @@
 		const Engine = new Mercury({
 			onload: () => {
 				console.log('The engine and sounds are loaded!');
+				console.log('Samples loaded:', Engine.getBuffers());
 			}
 		});
 
