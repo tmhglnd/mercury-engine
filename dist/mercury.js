@@ -17245,7 +17245,8 @@ class MercuryInterpreter {
 			// return if the code contains any syntax errors
 			Util.log(`Could not run because of syntax error`);
 			Util.log(`Please see Help for more information`);
-			return;
+			// return the parsetree also if there are errors
+			return this.parse;
 		}
 		// if no errors the last evaluated code is stored
 		this._code = c;
@@ -17427,6 +17428,8 @@ class MercuryInterpreter {
 				this.p5canvas.display();
 			});
 		}
+		// return the parsetree to see from outside
+		return this.parse;
 	}
 }
 module.exports = { MercuryInterpreter }
