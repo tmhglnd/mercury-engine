@@ -19,9 +19,10 @@ Mercury currently has 2 versions:
 
 [**📟 Build a local app from the browser version with Electron**](https://github.com/tmhglnd/mercury-app) -->
 
-[**🙏 Support Mercury by becoming a Patron**](https://www.patreon.com/bePatron?u=9649817) 
-
 [**💬 Join the Mercury Community on Discord**](https://discord.gg/vt59NYU)
+
+[![](https://img.shields.io/static/v1?label=Support%20on%20Ko-Fi&message=%E2%9D%A4&logo=Kofi)](https://ko-fi.com/I2I3SV7FX)
+[![](https://img.shields.io/static/v1?label=Support%20on%20Patreon&message=%E2%9D%A4&logo=Patreon)](https://www.patreon.com/bePatron?u=9649817)
 
 <!-- ![The Mercury playground in the browser](media/screenshot.png) -->
 
