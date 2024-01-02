@@ -13,8 +13,7 @@ Mercury currently has 2 versions:
 
 [**🚀 Start Sketching Online!** (recommended for beginners)](https://mercury.timohoogland.com/)
 
-**👾 Or code with the latest full version in Max8:** 
-
+<!-- **👾 Or code with the latest full version in Max8:**  -->
 <!-- [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/tmhglnd/mercury)](https://github.com/tmhglnd/mercury/releases)
 
 [**📟 Build a local app from the browser version with Electron**](https://github.com/tmhglnd/mercury-app) -->
