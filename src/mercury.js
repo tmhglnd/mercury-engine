@@ -128,17 +128,17 @@ class Mercury extends MercuryInterpreter {
 
 	// stop the transport and all the sounds
 	silence(){
+		// fade out and remove code after 100ms
+		this.removeSounds(this.sounds, 0.1);
+		
 		try {
-			// fade out and remove code after 100ms
-			this.removeSounds(this.sounds, 0.1);
 			// Stops instead of pause so restarts at 0
 			Tone.Transport.stop(Tone.now()+0.1);
 			// console.log('Stopped Transport');
-			return true;
 		} catch {
 			console.error('Error stopping Transport');
-			return false;
 		}
+		return true;
 	}
 
 	// set the bpm and optionally ramp in milliseconds
