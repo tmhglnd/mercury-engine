@@ -16064,11 +16064,10 @@ class MonoSample extends Instrument {
 		// get the start position
 		let o = dur * Util.getParam(this._pos, c);
 
-		// when sample is loaded, start
-		// this.sample.start(time, o, e);
-		this.sample.start(time, o);
-		// if (this.sample.loaded){
-		// }
+		// when sample is loaded allow playback to start
+		if (this.sample.loaded){
+			this.sample.start(time, o);
+		}
 	}
 
 	sound(s){
@@ -17281,7 +17280,9 @@ class MercuryInterpreter {
 			'silence' : (mute) => {
 				if (mute){ 
 					// engine.silence(); 
-					this.silence(); 
+					if (this.silence()){
+						return;
+					}
 				}
 			},
 			'scale' : (args) => {
@@ -17555,7 +17556,7 @@ class Mercury extends MercuryInterpreter {
 				Tone.Transport.timeSignature = [4, 4];
 				// a bit latency on start for safety
 				Tone.Transport.start('+0.1');
-				console.log('Resumed Transport');
+				// console.log('Resumed Transport');
 			}
 		} catch {
 			console.error('Error starting Transport');
@@ -17568,10 +17569,12 @@ class Mercury extends MercuryInterpreter {
 			// fade out and remove code after 100ms
 			this.removeSounds(this.sounds, 0.1);
 			// Stops instead of pause so restarts at 0
-			Tone.Transport.stop();
-			console.log('Stopped Transport');
+			Tone.Transport.stop(Tone.now()+0.1);
+			// console.log('Stopped Transport');
+			return true;
 		} catch {
 			console.error('Error stopping Transport');
+			return false;
 		}
 	}
 

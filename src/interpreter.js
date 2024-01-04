@@ -152,7 +152,9 @@ class MercuryInterpreter {
 			'silence' : (mute) => {
 				if (mute){ 
 					// engine.silence(); 
-					this.silence(); 
+					if (this.silence()){
+						return;
+					}
 				}
 			},
 			'scale' : (args) => {

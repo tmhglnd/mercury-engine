@@ -119,7 +119,7 @@ class Mercury extends MercuryInterpreter {
 				Tone.Transport.timeSignature = [4, 4];
 				// a bit latency on start for safety
 				Tone.Transport.start('+0.1');
-				console.log('Resumed Transport');
+				// console.log('Resumed Transport');
 			}
 		} catch {
 			console.error('Error starting Transport');
@@ -132,10 +132,12 @@ class Mercury extends MercuryInterpreter {
 			// fade out and remove code after 100ms
 			this.removeSounds(this.sounds, 0.1);
 			// Stops instead of pause so restarts at 0
-			Tone.Transport.stop();
-			console.log('Stopped Transport');
+			Tone.Transport.stop(Tone.now()+0.1);
+			// console.log('Stopped Transport');
+			return true;
 		} catch {
 			console.error('Error stopping Transport');
+			return false;
 		}
 	}
 
