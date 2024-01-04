@@ -21,6 +21,7 @@ class MercuryInterpreter {
 		// arrays with the current and previous instruments for crossfade
 		this._sounds = [];
 		this.sounds = [];
+		this.silenced = false;
 
 		// storage of latest evaluated code
 		this._code = '';
@@ -88,6 +89,9 @@ class MercuryInterpreter {
 	}
 
 	code(file=''){
+		// is not silenced initially
+		this.silenced = false;
+
 		// parse and evaluate the inputted code
 		let c = (!file)? this._code : file;
 		
@@ -151,10 +155,7 @@ class MercuryInterpreter {
 			}, 
 			'silence' : (mute) => {
 				if (mute){ 
-					// engine.silence(); 
-					if (this.silence()){
-						return;
-					}
+					this.silenced = this.silence();
 				}
 			},
 			'scale' : (args) => {
@@ -251,17 +252,22 @@ class MercuryInterpreter {
 			}
 		}
 
-		// copy current sounds over to past
-		this._sounds = this.sounds.slice();
-		// empty new sounds array
-		this.sounds = [];
-
 		// handle .global
 		Object.keys(this.tree.global).forEach((g) => {
 			if (globalMap[g]){
 				globalMap[g](this.tree.global[g]);
 			}
 		});
+
+		// if silenced break out of everything
+		if (this.silenced){
+			return;
+		}
+
+		// copy current sounds over to past
+		this._sounds = this.sounds.slice();
+		// empty new sounds array
+		this.sounds = [];
 
 		// handle .objects
 		for (let o in this.tree.objects){

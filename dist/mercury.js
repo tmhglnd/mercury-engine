@@ -17149,6 +17149,7 @@ class MercuryInterpreter {
 		// arrays with the current and previous instruments for crossfade
 		this._sounds = [];
 		this.sounds = [];
+		this.silenced = false;
 
 		// storage of latest evaluated code
 		this._code = '';
@@ -17216,6 +17217,9 @@ class MercuryInterpreter {
 	}
 
 	code(file=''){
+		// is not silenced initially
+		this.silenced = false;
+
 		// parse and evaluate the inputted code
 		let c = (!file)? this._code : file;
 		
@@ -17279,10 +17283,7 @@ class MercuryInterpreter {
 			}, 
 			'silence' : (mute) => {
 				if (mute){ 
-					// engine.silence(); 
-					if (this.silence()){
-						return;
-					}
+					this.silenced = this.silence();
 				}
 			},
 			'scale' : (args) => {
@@ -17379,17 +17380,22 @@ class MercuryInterpreter {
 			}
 		}
 
-		// copy current sounds over to past
-		this._sounds = this.sounds.slice();
-		// empty new sounds array
-		this.sounds = [];
-
 		// handle .global
 		Object.keys(this.tree.global).forEach((g) => {
 			if (globalMap[g]){
 				globalMap[g](this.tree.global[g]);
 			}
 		});
+
+		// if silenced break out of everything
+		if (this.silenced){
+			return;
+		}
+
+		// copy current sounds over to past
+		this._sounds = this.sounds.slice();
+		// empty new sounds array
+		this.sounds = [];
 
 		// handle .objects
 		for (let o in this.tree.objects){
@@ -17565,17 +17571,17 @@ class Mercury extends MercuryInterpreter {
 
 	// stop the transport and all the sounds
 	silence(){
-		// fade out and remove code after 100ms
-		this.removeSounds(this.sounds, 0.1);
-		
 		try {
+			// fade out and remove code after 100ms
+			this.removeSounds(this.sounds, 0.1);
 			// Stops instead of pause so restarts at 0
 			Tone.Transport.stop(Tone.now()+0.1);
+			return true;
 			// console.log('Stopped Transport');
 		} catch {
 			console.error('Error stopping Transport');
+			return false;
 		}
-		return true;
 	}
 
 	// set the bpm and optionally ramp in milliseconds
