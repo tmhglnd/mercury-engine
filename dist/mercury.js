@@ -17389,7 +17389,7 @@ class MercuryInterpreter {
 
 		// if silenced break out of everything
 		if (this.silenced){
-			return;
+			return this.parse;
 		}
 
 		// copy current sounds over to past
