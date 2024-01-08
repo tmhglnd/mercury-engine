@@ -344,9 +344,11 @@ const LFO = function(_params){
 		rect : 'square',
 		triangle : 'triangle',
 		tri : 'triangle',
+		up: 'sawtooth',
+		sawUp: 'sawtooth'
 	}
 
-	this._lfo = new Tone.LFO('8n', 0, 1);
+	this._lfo = new Tone.LFO();
 	this._fx = new Tone.Gain();
 	this._lfo.connect(this._fx.gain);
 	// this._fx = new Tone.Tremolo('8n').start();
@@ -371,9 +373,13 @@ const LFO = function(_params){
 		this._lfo.frequency.setValueAtTime(1/f, time);
 
 		let a = Util.getParam(this._depth, c);
-		this._lfo.min = Math.min(1, Math.max(0, 1 - a));
-
-		this._lfo.start(time);
+		this._lfo.min = Math.min(1, Math.max(0, 1 - a));	
+		if (this._lfo.state !== 'started'){
+			if (w === 'sawtooth') {
+				this._lfo.phase = 180;
+			}
+			this._lfo.start(time);
+		}
 	}
 
 	this.chain = function(){

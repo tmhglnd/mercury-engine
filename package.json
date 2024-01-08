@@ -1,6 +1,6 @@
 {
   "name": "mercury-engine",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "description": "The mercury engine generates web audio output from mercury code input",
   "main": "./dist/mercury.js",
   "scripts": {
