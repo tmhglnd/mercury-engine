@@ -16525,8 +16525,10 @@ class PolySample extends PolyInstrument {
 		// get the start position
 		let p = dur * Util.getParam(this._pos, c);
 
-		// when sample is loaded, start
-		this.sources[id].start(time, p);
+		// when sample is loaded allow playback to start
+		if (this.sources[id].loaded){
+			this.sources[id].start(time, p);
+		}
 	}
 
 	sound(s){
@@ -17322,6 +17324,12 @@ class MercuryInterpreter {
 			'lowPass' : (args) => {
 				this.setLowPass(...args);
 				// engine.setLowPass(...args);
+			},
+			'samples' : (args) => {
+				// load samples in the audiobuffer
+				// this can be a single url to a soundfile
+				// or a url to a folder that will be searched through
+				this.addBuffers(args);
 			}
 		}
 

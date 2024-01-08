@@ -194,6 +194,12 @@ class MercuryInterpreter {
 			'lowPass' : (args) => {
 				this.setLowPass(...args);
 				// engine.setLowPass(...args);
+			},
+			'samples' : (args) => {
+				// load samples in the audiobuffer
+				// this can be a single url to a soundfile
+				// or a url to a folder that will be searched through
+				this.addBuffers(args);
 			}
 		}
 
