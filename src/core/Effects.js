@@ -40,6 +40,12 @@ const fxMap = {
 	'degrade' : (params) => {
 		return new DownSampler(params);
 	},
+	'room' : (params) => {
+		return new Reverb(params);
+	},
+	'verb' : (params) => {
+		return new Reverb(params);
+	},
 	'reverb' : (params) => {
 		return new Reverb(params);
 	},
@@ -49,9 +55,9 @@ const fxMap = {
 	'pitchShift' : (params) => {
 		return new PitchShift(params);
 	},
-	'tune' : (params) => {
-		return new PitchShift(params);
-	},
+	// 'tune' : (params) => {
+	// 	return new PitchShift(params);
+	// },
 	'filter' : (params) => {
 		return new Filter(params);
 	},
@@ -76,8 +82,14 @@ const fxMap = {
 	'ppDelay' : (params) => {
 		return new PingPongDelay(params);
 	},
-	'freeverb' : (params) => {
-		return new FreeVerb(params);
+	// 'freeverb' : (params) => {
+	// 	return new FreeVerb(params);
+	// },
+	'chorus' : (params) => {
+		return new Chorus(Util.mapDefaults(params, ['4/1', 45, 0.5]));
+	},
+	'double' : (params) => {
+		return new Chorus(Util.mapDefaults(params, ['8/1', 8, 1]));
 	}
 }
 module.exports = fxMap;
@@ -194,6 +206,41 @@ const Compressor = function(_params){
 		this._fx.dispose();
 	}
 }
+
+// A Chorus effect based on the default ToneJS effect
+// Also the Double effect if the wetdry is set to 1 (only wet signal)
+// 
+const Chorus = function(_params){
+	// also start the oscillators for the effect
+	this._fx = new Tone.Chorus().start();
+
+	this.set = (c, time, bpm) => {
+		// convert division to frequency
+		let f = Util.divToF(Util.getParam(_params[0], c), bpm);
+		this._fx.frequency.setValueAtTime(f, time);
+		// delaytime/2 because of up and down through center
+		// eg. 25 goes from 0 to 50, 40 goes from 0 to 80, etc.
+		this._fx.delayTime = Util.getParam(_params[1], c) / 2;
+
+		// waveform for chorus is not supported in browser instead change wetdry
+		let w = Util.getParam(_params[2], c);
+		if (isNaN(w)){
+			log(`Wavetype is not supported currently, instead change wet/dry with this argument, defaults to 0.5`);
+			w = 0.5;
+		}
+		this._fx.wet.setValueAtTime(w, time);
+	}
+
+	this.chain = () => {
+		return { 'send' : this._fx, 'return' : this._fx }
+	}
+
+	this.delete = () => {
+		this._fx.disconnect();
+		this._fx.dispose();
+	}
+}
+
 
 // A distortion/compression effect of an incoming signal
 // Based on an algorithm by Peter McCulloch

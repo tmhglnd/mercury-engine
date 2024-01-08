@@ -24,6 +24,7 @@ class Sequencer {
 		// Tone looper
 		this._event;
 		this._loop;
+		this._once = false;
 		this.makeLoop();
 
 		console.log('=> class Sequencer()');
@@ -95,6 +96,13 @@ class Sequencer {
 			}
 			// increment count for sequencing
 			this._count++;
+
+			// if the sample is set to only play once mute the loop 
+			// afterwards and dispose
+			if (this._once){ 
+				this._loop.mute = 1; 
+				this._loop.dispose();
+			}
 		}
 
 		if (this._time){
@@ -151,7 +159,7 @@ class Sequencer {
 		this._loop.stop();
 	}
 
-	time(t, o=0, s=[1]){
+	time(t, o=0){
 		// set the timing interval and offset
 		if (t === 'free'){
 			this._time = null;
@@ -159,9 +167,20 @@ class Sequencer {
 		} else {
 			this._time = Util.formatRatio(t, this.bpm());
 			this._offset = Util.formatRatio(o, this.bpm());
-			// set timing division optionally, also possible via timediv()
-			// this.timediv(s);
 		}
+	}
+
+	once(o=0){
+		// play the sample/synth/midi once or not?
+		// the moment of playing is determined by the time and offset
+		this._once = (o > 0 || o === 'on' || o === 'true') ? true : false;
+	}
+
+	ratchet(p=1, s=[1]){
+		// set the ratcheting probability and subdivision
+		// for now defaults to the timediv method
+		Util.log(`ratchet() is not yet supported. Defaults to timediv() with probability of 1`);
+		this.timediv(s);
 	}
 
 	timediv(s){

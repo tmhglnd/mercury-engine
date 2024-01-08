@@ -1,5 +1,16 @@
 const { noteToMidi, toScale, mtof } = require('total-serialism').Translate;
 
+// replace defaults with incoming parameters
+function mapDefaults(params, defaults){
+	defaults.splice(0, params.length, ...params);
+	return defaults.map(p => toArray(p));
+}
+
+// convert amplitude to dBFS scale
+function atodb(a=0){
+	return 20 * Math.log(a);
+}
+
 // clip a value between a specified range
 function clip(v, l, h){
 	return Math.max(l, Math.min(h, v));
@@ -125,6 +136,11 @@ function divToS(d, bpm){
 	}
 }
 
+// convert division format to frequency in Hz based on bpm
+function divToF(d, bpm){
+	return 1.0 / divToS(d, bpm)
+}
+
 // convert note value to a frequency 
 function noteToFreq(i, o){
 	if (isNaN(i)){
@@ -193,4 +209,4 @@ function log(msg){
 	}
 }
 
-module.exports = { clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }
+module.exports = { mapDefaults, atodb, clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }

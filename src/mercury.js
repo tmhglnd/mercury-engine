@@ -144,8 +144,9 @@ class Mercury extends MercuryInterpreter {
 	// set the bpm and optionally ramp in milliseconds
 	setBPM(bpm, ramp=0) {
 		this.bpm = bpm;
-		if (ramp > 0){
-			Tone.Transport.bpm.rampTo(bpm, ramp / 1000);
+		let t = Util.divToS(ramp, bpm);
+		if (t > 0){
+			Tone.Transport.bpm.rampTo(bpm, t);
 		} else {
 			Tone.Transport.bpm.setValueAtTime(bpm, Tone.now());
 		}
@@ -262,31 +263,34 @@ class Mercury extends MercuryInterpreter {
 
 	// set lowpass frequency cutoff and ramptime
 	setLowPass(f, t=0){
-		this.lowPass = f;
+		this.lowPass = (f === 'default')? 18000 : f;
+		t = Util.divToS(t, this.bpm);
 		if (t > 0){
-			this.lowPassF.frequency.rampTo(f, t/1000, Tone.now());
+			this.lowPassF.frequency.rampTo(this.lowPass, t, Tone.now());
 		} else {
-			this.lowPassF.frequency.setValueAtTime(f, Tone.now());
+			this.lowPassF.frequency.setValueAtTime(this.lowPass, Tone.now());
 		}
 	}
 
 	// set highpass frequency cutoff and ramptime
 	setHighPass(f, t=0){
-		this.highPass = f;
+		this.highPass = (f === 'default')? 5 : f;
+		t = Util.divToS(t, this.bpm);
 		if (t > 0){
-			this.highPassF.frequency.rampTo(f, t/1000, Tone.now());
+			this.highPassF.frequency.rampTo(this.highPass, t, Tone.now());
 		} else {
-			this.highPassF.frequency.setValueAtTime(f, Tone.now());
+			this.highPassF.frequency.setValueAtTime(this.highPass, Tone.now());
 		}
 	}
 
 	// set volume in floatingpoint and ramptime
 	setVolume(v, t=0){
-		this.volume = v;
+		this.volume = (v === 'default')? 1 : v;
+		t = Util.divToS(t, this.bpm);
 		if (t > 0){
-			this.gain.gain.rampTo(v, t/1000, Tone.now());
+			this.gain.gain.rampTo(this.volume, t, Tone.now());
 		} else {
-			this.gain.gain.setValueAtTime(v, Tone.now());
+			this.gain.gain.setValueAtTime(this.volume, Tone.now());
 		}
 	}
 

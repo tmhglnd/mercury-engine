@@ -6590,6 +6590,11 @@ module.exports={
 		"low"
 	],
 
+	"super" : [
+		"fat",
+		"unison"
+	],
+
 	"add_fx" : [
 		"fx",
 		"withFX",
@@ -6702,7 +6707,6 @@ const emptyDefault = {
 			'beat' : 	[ 1, -1 ],
 			'amp' :		[ 1 ],
 			'env' :		[ 1, 250 ],
-			'pan' : 	[ 0 ],
 			'note' :	[ 0, 0 ],
 			'add_fx' : 	[]
 		}
@@ -6714,14 +6718,16 @@ const instrumentDefaults = {
 		'type' : 'saw',
 		'functions' : {
 			'amp' :		[ 0.7 ],
-			'wave2' : 	[ 'saw', 0 ]
+			'wave2' : 	[ 'saw', 0 ],
+			'pan' : 	[ 0 ]
 		}
 	},
 	'polySynth' : {
 		'type' : 'saw',
 		'functions' : {
 			'amp' : 	[ 0.7 ],
-			'wave2' : 	[ 'saw', 0 ]
+			'wave2' : 	[ 'saw', 0 ],
+			'pan' : 	[ 0 ]
 		}
 	},
 	'sample' : {
@@ -6732,7 +6738,8 @@ const instrumentDefaults = {
 			'stretch' : [ 0, 1, 1 ],
 			'speed' :	[ 1 ],
 			'note' :	[ 'off' ],
-			'tune' :	[ 60 ]
+			'tune' :	[ 60 ],
+			'pan' : 	[ 0 ]
 		}
 	},
 	'loop' : {
@@ -6743,7 +6750,8 @@ const instrumentDefaults = {
 			'stretch' : [ 1, 1, 1 ],
 			'speed' :	[ 1 ],
 			'note' :	[ 'off' ],
-			'tune' :	[ 60 ]
+			'tune' :	[ 60 ],
+			'pan' : 	[ 0 ]
 		}
 	},
 	'midi' : {
@@ -6760,7 +6768,8 @@ const instrumentDefaults = {
 		'functions' : {
 			'env' : 	[ -1 ],
 			'amp' : 	[ 0.9 ],
-			'note' :	[ 'off' ]
+			'note' :	[ 'off' ],
+			'pan' : 	[ 0 ]
 		}
 	}
 }
@@ -14922,6 +14931,12 @@ const fxMap = {
 	'degrade' : (params) => {
 		return new DownSampler(params);
 	},
+	'room' : (params) => {
+		return new Reverb(params);
+	},
+	'verb' : (params) => {
+		return new Reverb(params);
+	},
 	'reverb' : (params) => {
 		return new Reverb(params);
 	},
@@ -14931,9 +14946,9 @@ const fxMap = {
 	'pitchShift' : (params) => {
 		return new PitchShift(params);
 	},
-	'tune' : (params) => {
-		return new PitchShift(params);
-	},
+	// 'tune' : (params) => {
+	// 	return new PitchShift(params);
+	// },
 	'filter' : (params) => {
 		return new Filter(params);
 	},
@@ -14958,8 +14973,14 @@ const fxMap = {
 	'ppDelay' : (params) => {
 		return new PingPongDelay(params);
 	},
-	'freeverb' : (params) => {
-		return new FreeVerb(params);
+	// 'freeverb' : (params) => {
+	// 	return new FreeVerb(params);
+	// },
+	'chorus' : (params) => {
+		return new Chorus(Util.mapDefaults(params, ['4/1', 45, 0.5]));
+	},
+	'double' : (params) => {
+		return new Chorus(Util.mapDefaults(params, ['8/1', 8, 1]));
 	}
 }
 module.exports = fxMap;
@@ -15076,6 +15097,41 @@ const Compressor = function(_params){
 		this._fx.dispose();
 	}
 }
+
+// A Chorus effect based on the default ToneJS effect
+// Also the Double effect if the wetdry is set to 1 (only wet signal)
+// 
+const Chorus = function(_params){
+	// also start the oscillators for the effect
+	this._fx = new Tone.Chorus().start();
+
+	this.set = (c, time, bpm) => {
+		// convert division to frequency
+		let f = Util.divToF(Util.getParam(_params[0], c), bpm);
+		this._fx.frequency.setValueAtTime(f, time);
+		// delaytime/2 because of up and down through center
+		// eg. 25 goes from 0 to 50, 40 goes from 0 to 80, etc.
+		this._fx.delayTime = Util.getParam(_params[1], c) / 2;
+
+		// waveform for chorus is not supported in browser instead change wetdry
+		let w = Util.getParam(_params[2], c);
+		if (isNaN(w)){
+			log(`Wavetype is not supported currently, instead change wet/dry with this argument, defaults to 0.5`);
+			w = 0.5;
+		}
+		this._fx.wet.setValueAtTime(w, time);
+	}
+
+	this.chain = () => {
+		return { 'send' : this._fx, 'return' : this._fx }
+	}
+
+	this.delete = () => {
+		this._fx.disconnect();
+		this._fx.dispose();
+	}
+}
+
 
 // A distortion/compression effect of an incoming signal
 // Based on an algorithm by Peter McCulloch
@@ -15640,7 +15696,7 @@ class Instrument extends Sequencer {
 		this.panner.pan.setValueAtTime(p, time);
 
 		// ramp volume
-		let g = 20 * Math.log(Util.getParam(this._gain[0], c) * 0.707);
+		let g = Util.atodb(Util.getParam(this._gain[0], c) * 0.707);
 		let r = Util.msToS(Math.max(0, Util.getParam(this._gain[1], c)));
 		this.source.volume.rampTo(g, r, time);
 
@@ -16159,6 +16215,7 @@ class MonoSynth extends Instrument {
 		// // synth specific variables;
 		this._note = [ 0, 0 ];
 		this._slide = [ 0 ];
+		this._firstSlide = true;
 		this._voices = [ 1 ];
 		this._detune = [ 0 ];
 
@@ -16210,24 +16267,20 @@ class MonoSynth extends Instrument {
 
 		// get the slide time for next note and set the frequency
 		let s = Util.divToS(Util.getParam(this._slide, c), this.bpm());
-		if (s > 0){
+		if (s > 0 && !this._firstSlide){
 			this.synth.frequency.rampTo(f, s, time);
 		} else {
 			this.synth.frequency.setValueAtTime(f, time);
+			this._firstSlide = false;
 		}
 	}
 
-	super(d=[0.1], v=[3]){
+	super(v=[3], d=[0.111]){
 		// add unison voices and detune the spread
 		// first argument is the detune amount
 		// second argument changes the amount of voices
 		this._voices = Util.toArray(v);
 		this._detune = Util.toArray(d);
-	}
-
-	fat(...a){
-		// alias for super synth
-		this.super(...a);
 	}
 
 	slide(s){
@@ -16609,6 +16662,7 @@ class PolySynth extends PolyInstrument {
 		this._wave = Util.toArray(t);
 		this._note = [ 0, 0 ];
 		this._slide = [ 0 ];
+		this._firstSlide = [];
 		this._voices = [ 1 ];
 		this._detune = [ 0 ];
 
@@ -16622,6 +16676,7 @@ class PolySynth extends PolyInstrument {
 			this.sources[i] = new Tone.FatOscillator().connect(this.adsrs[i]);
 			this.sources[i].count = 1;
 			this.sources[i].start();
+			this._firstSlide[i] = true;
 		}
 	}
 
@@ -16654,10 +16709,12 @@ class PolySynth extends PolyInstrument {
 
 		// get the slide time for next note and set the frequency
 		let s = Util.divToS(Util.getParam(this._slide, c), this.bpm());
-		if (s > 0){
+		if (s > 0 && !this._firstSlide[id]){
 			this.sources[id].frequency.rampTo(f, s, time);
 		} else {
 			this.sources[id].frequency.setValueAtTime(f, time);
+			// first time the synth plays it doesn't slide!
+			this._firstSlide[id] = false;
 		}
 	}
 
@@ -16667,17 +16724,12 @@ class PolySynth extends PolyInstrument {
 		this._note = [Util.toArray(i), Util.toArray(o)];
 	}
 
-	super(d=[0.1], v=[3]){
+	super(v=[3], d=[0.1]){
 		// add unison voices and detune the spread
 		// first argument is the detune amount
 		// second argument changes the amount of voices
 		this._voices = Util.toArray(v);
 		this._detune = Util.toArray(d);
-	}
-
-	fat(...a){
-		// alias for super synth
-		this.super(...a);
 	}
 
 	slide(s){
@@ -16724,6 +16776,7 @@ class Sequencer {
 		// Tone looper
 		this._event;
 		this._loop;
+		this._once = false;
 		this.makeLoop();
 
 		console.log('=> class Sequencer()');
@@ -16795,6 +16848,13 @@ class Sequencer {
 			}
 			// increment count for sequencing
 			this._count++;
+
+			// if the sample is set to only play once mute the loop 
+			// afterwards and dispose
+			if (this._once){ 
+				this._loop.mute = 1; 
+				this._loop.dispose();
+			}
 		}
 
 		if (this._time){
@@ -16851,7 +16911,7 @@ class Sequencer {
 		this._loop.stop();
 	}
 
-	time(t, o=0, s=[1]){
+	time(t, o=0){
 		// set the timing interval and offset
 		if (t === 'free'){
 			this._time = null;
@@ -16859,9 +16919,20 @@ class Sequencer {
 		} else {
 			this._time = Util.formatRatio(t, this.bpm());
 			this._offset = Util.formatRatio(o, this.bpm());
-			// set timing division optionally, also possible via timediv()
-			// this.timediv(s);
 		}
+	}
+
+	once(o=0){
+		// play the sample/synth/midi once or not?
+		// the moment of playing is determined by the time and offset
+		this._once = (o > 0 || o === 'on' || o === 'true') ? true : false;
+	}
+
+	ratchet(p=1, s=[1]){
+		// set the ratcheting probability and subdivision
+		// for now defaults to the timediv method
+		Util.log(`ratchet() is not yet supported. Defaults to timediv() with probability of 1`);
+		this.timediv(s);
 	}
 
 	timediv(s){
@@ -16911,6 +16982,17 @@ class Sequencer {
 module.exports = Sequencer;
 },{"./Util.js":66,"tone":44,"webmidi":55}],66:[function(require,module,exports){
 const { noteToMidi, toScale, mtof } = require('total-serialism').Translate;
+
+// replace defaults with incoming parameters
+function mapDefaults(params, defaults){
+	defaults.splice(0, params.length, ...params);
+	return defaults.map(p => toArray(p));
+}
+
+// convert amplitude to dBFS scale
+function atodb(a=0){
+	return 20 * Math.log(a);
+}
 
 // clip a value between a specified range
 function clip(v, l, h){
@@ -17037,6 +17119,11 @@ function divToS(d, bpm){
 	}
 }
 
+// convert division format to frequency in Hz based on bpm
+function divToF(d, bpm){
+	return 1.0 / divToS(d, bpm)
+}
+
 // convert note value to a frequency 
 function noteToFreq(i, o){
 	if (isNaN(i)){
@@ -17105,7 +17192,7 @@ function log(msg){
 	}
 }
 
-module.exports = { clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }
+module.exports = { mapDefaults, atodb, clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }
 },{"total-serialism":47}],67:[function(require,module,exports){
 module.exports={
 	"uptempo" : 10,
@@ -17595,8 +17682,9 @@ class Mercury extends MercuryInterpreter {
 	// set the bpm and optionally ramp in milliseconds
 	setBPM(bpm, ramp=0) {
 		this.bpm = bpm;
-		if (ramp > 0){
-			Tone.Transport.bpm.rampTo(bpm, ramp / 1000);
+		let t = Util.divToS(ramp, bpm);
+		if (t > 0){
+			Tone.Transport.bpm.rampTo(bpm, t);
 		} else {
 			Tone.Transport.bpm.setValueAtTime(bpm, Tone.now());
 		}
@@ -17713,31 +17801,34 @@ class Mercury extends MercuryInterpreter {
 
 	// set lowpass frequency cutoff and ramptime
 	setLowPass(f, t=0){
-		this.lowPass = f;
+		this.lowPass = (f === 'default')? 18000 : f;
+		t = Util.divToS(t, this.bpm);
 		if (t > 0){
-			this.lowPassF.frequency.rampTo(f, t/1000, Tone.now());
+			this.lowPassF.frequency.rampTo(this.lowPass, t, Tone.now());
 		} else {
-			this.lowPassF.frequency.setValueAtTime(f, Tone.now());
+			this.lowPassF.frequency.setValueAtTime(this.lowPass, Tone.now());
 		}
 	}
 
 	// set highpass frequency cutoff and ramptime
 	setHighPass(f, t=0){
-		this.highPass = f;
+		this.highPass = (f === 'default')? 5 : f;
+		t = Util.divToS(t, this.bpm);
 		if (t > 0){
-			this.highPassF.frequency.rampTo(f, t/1000, Tone.now());
+			this.highPassF.frequency.rampTo(this.highPass, t, Tone.now());
 		} else {
-			this.highPassF.frequency.setValueAtTime(f, Tone.now());
+			this.highPassF.frequency.setValueAtTime(this.highPass, Tone.now());
 		}
 	}
 
 	// set volume in floatingpoint and ramptime
 	setVolume(v, t=0){
-		this.volume = v;
+		this.volume = (v === 'default')? 1 : v;
+		t = Util.divToS(t, this.bpm);
 		if (t > 0){
-			this.gain.gain.rampTo(v, t/1000, Tone.now());
+			this.gain.gain.rampTo(this.volume, t, Tone.now());
 		} else {
-			this.gain.gain.setValueAtTime(v, Tone.now());
+			this.gain.gain.setValueAtTime(this.volume, Tone.now());
 		}
 	}
 

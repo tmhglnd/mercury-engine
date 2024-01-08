@@ -25,6 +25,7 @@ class MonoSynth extends Instrument {
 		// // synth specific variables;
 		this._note = [ 0, 0 ];
 		this._slide = [ 0 ];
+		this._firstSlide = true;
 		this._voices = [ 1 ];
 		this._detune = [ 0 ];
 
@@ -76,24 +77,20 @@ class MonoSynth extends Instrument {
 
 		// get the slide time for next note and set the frequency
 		let s = Util.divToS(Util.getParam(this._slide, c), this.bpm());
-		if (s > 0){
+		if (s > 0 && !this._firstSlide){
 			this.synth.frequency.rampTo(f, s, time);
 		} else {
 			this.synth.frequency.setValueAtTime(f, time);
+			this._firstSlide = false;
 		}
 	}
 
-	super(d=[0.1], v=[3]){
+	super(v=[3], d=[0.111]){
 		// add unison voices and detune the spread
 		// first argument is the detune amount
 		// second argument changes the amount of voices
 		this._voices = Util.toArray(v);
 		this._detune = Util.toArray(d);
-	}
-
-	fat(...a){
-		// alias for super synth
-		this.super(...a);
 	}
 
 	slide(s){
