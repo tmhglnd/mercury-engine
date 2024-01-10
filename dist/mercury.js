@@ -17000,6 +17000,11 @@ function atodb(a=0){
 	return 20 * Math.log(a);
 }
 
+// convert dbFS to amplitude
+function dbtoa(db=0){
+	return 10 ** (db/20);
+}
+
 // clip a value between a specified range
 function clip(v, l, h){
 	return Math.max(l, Math.min(h, v));
@@ -17198,7 +17203,7 @@ function log(msg){
 	}
 }
 
-module.exports = { mapDefaults, atodb, clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }
+module.exports = { mapDefaults, atodb, dbtoa, clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }
 },{"total-serialism":47}],67:[function(require,module,exports){
 module.exports={
 	"uptempo" : 10,
@@ -17591,6 +17596,9 @@ class Mercury extends MercuryInterpreter {
 		this.highPassF = new Tone.Filter(5, 'highpass');
 		Tone.Destination.chain(this.lowPassF, this.highPassF, this.gain);
 
+		// an RMS meter for reactive visuals
+		this.meter;
+
 		// a recorder for the sound
 		this.recorder = new Tone.Recorder({ mimeType: 'audio/webm' });
 		this.gain.connect(this.recorder);
@@ -17870,6 +17878,28 @@ class Mercury extends MercuryInterpreter {
 	isRecording(){
 		return this.recorder.state;
 	}
+
+	// add a Tone RMS meter to use for signal analysis
+	addMeter(smooth=0.7){
+		this.meter = new Tone.Meter(smooth);
+		this.meter.normalRange = true;
+		this.gain.connect(this.meter);
+	}
+
+	// return the meter value as float betwee 0-1
+	getMeter(){
+		return this.meter.getValue();
+	}
+
+	// get the webaudio context Mercury is producing sound on
+	// getContext(){
+	// 	return Tone.getContext();
+	// }
+
+	// get the destination output Mercury is sending sound to
+	// getDestination(){
+	// 	return Tone.getDestination();
+	// }
 }
 module.exports = { Mercury };
 },{"./core/Util.js":66,"./interpreter":68,"tone":44,"webmidi":55}]},{},[69])(69)

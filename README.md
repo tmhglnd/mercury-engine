@@ -180,6 +180,36 @@ Stop the recording and download the file `myRecording.webm`
 Engine.record(false, 'myRecording');
 ```
 
+### Meter
+
+You can add a meter to the main audio output and poll for the amplitude value from the meter to for example create audio-reactive visuals in other programming languages such as Hydra or P5.js.
+
+First add the meter, optionally with a smoothing factor (default=0.7)
+
+```js
+Engine.addMeter();
+```
+
+Get the meter value as floating-point between 0-1
+
+```js
+Engine.getMeter();
+```
+
+Store the meters amplitude value in a global variable for usage in other places and update regularly with a setInterval at a defined interval in milliseconds.
+
+```js
+let amp;
+
+setInterval(() => amp = Engine.getMeter(), 100);
+```
+
+For example control some visual parameter in [Hydra](https://hydra.ojack.xyz)
+
+```js
+osc(10, 0.2, () => amp * 20).out();
+```
+
 ### MIDI
 
 WebMIDI is included and started if the browser is compatible with it. If not, an error will be printed to the console. You can provide a callback function `onmidi` to execute some code when the WebMIDI enabling was succesful.

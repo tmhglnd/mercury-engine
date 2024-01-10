@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<title>Mercury & Hydra Example</title>
+
+	<!-- Use the latest minified es5 distribution -->
+	<!-- <script src="https://unpkg.com/mercury-engine/dist/mercury.min.es5.js"></script> -->
+
+	<!-- from local while developing -->
+	<script src="./../../dist/mercury.js"></script>
+	<script src="https://unpkg.com/hydra-synth"></script>
+
+	<script src="https://unpkg.com/meyda/dist/web/meyda.min.js"></script>
+
+</head>
+
+<body>
+	<p style="font-family: 'arial';">
+		This example demonstrates how the Meter in the Mercury engine can be used to control some visual parameters in real time from for example the <a target="blank" href="https://hydra.ojack.xyz">Hydra</a> live coding language. Open the developers console to see the volume analysis printed as well.
+	</p>
+
+	<!-- 2 buttons in the html page -->
+	<button id="b1">start</button>
+	<button id="b2">silence</button>
+
+	<p id="engine-status" style="font-family: 'arial';"></p>
+
+	<script>
+		// Include the package from unpkg.com
+		const { Mercury } = MercuryEngine;
+
+		// global variable for storing the sound analysis from Mercury
+		let amp;
+		// create a new hydra-synth instance
+		var hydra = new Hydra({ detectAudio: false });
+		// generate some visuals
+		osc(10, 0.2, () => amp * 20).hue(() => amp * 5).out();
+
+		// Initialize a Mercury engine with callback function when loaded
+		const Engine = new Mercury({
+			onload: () => {
+				console.log('The engine and sounds are loaded!');
+				// when ready create the meter and set an interval to update
+				// the value for the visuals. 16ms is chosen because of 
+				// 1000ms/60fps = 16.667
+				Engine.addMeter();
+				setInterval(() => {
+					amp = Engine.getMeter();
+					consoleMeter(amp);
+				}, 16);
+			}
+		});
+
+		// Some mercury code initially created
+		const mercuryCode = `
+			set tempo 100
+			list drm choose(16 [kick_dub hat_808 snare_step])
+			new polySample drm time(1/16) play(euclid(16 9)) note(0 2)
+		`
+
+		// evaluate the code on the click of a button
+		let b1 = document.getElementById('b1');
+		b1.onclick = () => {
+			let tree = Engine.code(mercuryCode);
+			console.log(tree.errors);
+		}
+
+		// stop the code on the click of a button
+		let b2 = document.getElementById('b2');
+		b2.onclick = () => Engine.silence();
+
+		// function for "led bar meter print"
+		function consoleMeter(m){
+			leds = Math.floor((m ** 0.5) * 30);
+			disp = '';
+			for (let i=0; i<leds; i++){ disp += '▊'; }
+			console.log(`vol: ${disp}`);
+		}
+	</script>
+</body>
+
+</html>

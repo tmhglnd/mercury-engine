@@ -70,7 +70,7 @@
 			new synth saw name(s1)
 				set s1 note('{note.value()}' 0) slide(1/16) 
 				set s1 fx(filter low '{cutoff.value()}' 0.4 1/16) 
-				set s1 super('{detune.value()}' 3)  shape(off) 
+				set s1 super(3 '{detune.value()}')  shape(off) 
 				set s1 time(1/16) fx(degrade '{degrade.value()}')
 		`
 

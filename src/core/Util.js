@@ -11,6 +11,11 @@ function atodb(a=0){
 	return 20 * Math.log(a);
 }
 
+// convert dbFS to amplitude
+function dbtoa(db=0){
+	return 10 ** (db/20);
+}
+
 // clip a value between a specified range
 function clip(v, l, h){
 	return Math.max(l, Math.min(h, v));
@@ -209,4 +214,4 @@ function log(msg){
 	}
 }
 
-module.exports = { mapDefaults, atodb, clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }
+module.exports = { mapDefaults, atodb, dbtoa, clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }

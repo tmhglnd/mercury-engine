@@ -47,6 +47,9 @@ class Mercury extends MercuryInterpreter {
 		this.highPassF = new Tone.Filter(5, 'highpass');
 		Tone.Destination.chain(this.lowPassF, this.highPassF, this.gain);
 
+		// an RMS meter for reactive visuals
+		this.meter;
+
 		// a recorder for the sound
 		this.recorder = new Tone.Recorder({ mimeType: 'audio/webm' });
 		this.gain.connect(this.recorder);
@@ -326,5 +329,27 @@ class Mercury extends MercuryInterpreter {
 	isRecording(){
 		return this.recorder.state;
 	}
+
+	// add a Tone RMS meter to use for signal analysis
+	addMeter(smooth=0.7){
+		this.meter = new Tone.Meter(smooth);
+		this.meter.normalRange = true;
+		this.gain.connect(this.meter);
+	}
+
+	// return the meter value as float betwee 0-1
+	getMeter(){
+		return this.meter.getValue();
+	}
+
+	// get the webaudio context Mercury is producing sound on
+	// getContext(){
+	// 	return Tone.getContext();
+	// }
+
+	// get the destination output Mercury is sending sound to
+	// getDestination(){
+	// 	return Tone.getDestination();
+	// }
 }
 module.exports = { Mercury };
