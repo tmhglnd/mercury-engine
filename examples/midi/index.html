@@ -52,7 +52,7 @@
 			set tempo 100
 			set scale major c
 			new midi default time(1/1) chord(on) note(chordsFromNumerals(I IV V VIm) 1) length(1/2)
-			new midi default time(1/8) note(random(16 12) 2) length(1/16)
+			new midi default time(1/8) note(random(16 12) 2) length(1/16) program([0 5 10]) out(2)
 		`
 
 		// evaluate the code on the click of a button
