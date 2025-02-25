@@ -16334,10 +16334,11 @@ class MonoSynth extends Instrument {
 			triangle : 'triangle',
 			tri : 'triangle',
 			rect : 'square',
-			fm: 'fmsine',
-			am: 'amsine',
-			pwm: 'pwm',
-			organ: 'sine4',
+			organ : 'sine4',
+			// fm: 'fmsine',
+			// am: 'amsine',
+			// pwm: 'pwm',
+			// organ: 'sine4',
 		}
 		// // synth specific variables;
 		this._note = [ 0, 0 ];
@@ -16398,8 +16399,9 @@ class MonoSynth extends Instrument {
 			this.synth.frequency.rampTo(f, s, time);
 		} else {
 			this.synth.frequency.setValueAtTime(f, time);
-			this._firstSlide = false;
 		}
+		// first time the synth plays don't slide!
+		this._firstSlide = false;
 	}
 
 	super(v=[3], d=[0.111]){
@@ -16424,6 +16426,11 @@ class MonoSynth extends Instrument {
 		super.delete();
 		// dispose the sound source
 		// this.source.delete();
+		// this.adsr.dispose();
+		this.synth.stop();
+		this.synth.disconnect();
+		this.synth.dispose();
+
 		this.adsr.dispose();
 		this.synth.dispose();
 		this.source.dispose();
