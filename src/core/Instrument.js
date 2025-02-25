@@ -77,13 +77,14 @@ class Instrument extends Sequencer {
 		this.sourceEvent(c, e, time);
 
 		// fade-out running envelope over 5 ms
-		if (this.adsr.value > 0){
-			let tmp = this.adsr.release;
-			this.adsr.release = 0.005;
-			this.adsr.triggerRelease(time);
-			this.adsr.release = tmp;
-			time += 0.005;
-		}
+		// retrigger temporarily disabled to reduce distortion
+		// if (this.adsr.value > 0){
+		// 	let tmp = this.adsr.release;
+		// 	this.adsr.release = 0.004;
+		// 	this.adsr.triggerRelease(time-0.004);
+		// 	this.adsr.release = tmp;
+		// 	time += 0.010;
+		// }
 
 		// set shape for playback (fade-in / out and length)
 		if (this._att){
@@ -91,15 +92,21 @@ class Instrument extends Sequencer {
 			let dec = Util.divToS(Util.getParam(this._sus, c), this.bpm());
 			let rel = Util.divToS(Util.getParam(this._rel, c), this.bpm());
 
-			this.adsr.attack = att;
+			// minimum attaack and release times are 1 millisecond
+			this.adsr.attack = Math.max(0.001, att);
 			this.adsr.decay = dec;
-			this.adsr.release = rel;
+			this.adsr.release = Math.max(0.001, rel);
 			
-			e = Math.min(this._time, att + dec + rel);
+			// trigger the envelope and release after a short while
+			// a better working alternative for the code below
+			this.adsr.triggerAttack(time);
+			this.adsr.triggerRelease(time + att + dec);
+
+			// e = Math.min(this._time, att + dec + rel);
 			// e = Math.min(t, att + dec + rel);
 
-			let rt = Math.max(0.001, e - this.adsr.release);
-			this.adsr.triggerAttackRelease(rt, time);
+			// let rt = Math.max(0.001, e - this.adsr.release);
+			// this.adsr.triggerAttackRelease(rt, time);
 		} else {
 			// if shape is 'off' only trigger attack
 			this.adsr.triggerAttack(time);
@@ -130,7 +137,10 @@ class Instrument extends Sequencer {
 		// delete super class
 		super.delete();
 		// disconnect the sound dispose the player
+		this.gain.disconnect();
 		this.gain.dispose();
+
+		this.panner.disconnect();
 		this.panner.dispose();
 		// this.adsr.dispose();
 		// remove all fx
