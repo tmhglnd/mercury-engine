@@ -16,8 +16,8 @@ function dbtoa(db=0){
 	return 10 ** (db/20);
 }
 
-// clip a value between a specified range
-function clip(v, l, h){
+// clip a value between a specified range, defaults to 0 and 1 clip
+function clip(v, l=0, h=1){
 	return Math.max(l, Math.min(h, v));
 }
 
