@@ -15206,9 +15206,7 @@ const TanhDistortion = function(_params){
 //
 const Compressor = function(_params){
 	// replace defaults with provided params
-	this.defaults = [-30, 6, 10, 80];
-	this.defaults.splice(0, _params.length, ..._params);
-	_params = this.defaults.map(p => Util.toArray(p));	
+	_params = Util.mapDefaults(_params, [-30, 6, 10, 80]);
 
 	this._fx = new Tone.Compressor({
 		threshold: -24,
