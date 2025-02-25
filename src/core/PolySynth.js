@@ -81,6 +81,11 @@ class PolySynth extends PolyInstrument {
 		this._detune = Util.toArray(d);
 	}
 
+	fat(...a){
+		// alias for super/unison synth
+		this.super(...a);
+	}
+
 	slide(s){
 		// portamento from one note to another
 		this._slide = Util.toArray(s);
@@ -94,7 +99,7 @@ class PolySynth extends PolyInstrument {
 		// delete super class
 		super.delete();
 		
-		console.log('disposed MonoSynth()', this._wave);
+		console.log('disposed PolySynth()', this._wave);
 	}
 }
 module.exports = PolySynth;
