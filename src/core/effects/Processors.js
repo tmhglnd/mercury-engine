@@ -1,19 +1,19 @@
 
 // A white noise generator at -6dBFS to test AudioWorkletProcessor
 //
-class NoiseProcessor extends AudioWorkletProcessor {
-	process(inputs, outputs, parameters){
-		const output = outputs[0];
+// class NoiseProcessor extends AudioWorkletProcessor {
+// 	process(inputs, outputs, parameters){
+// 		const output = outputs[0];
 
-		output.forEach((channel) => {
-			for (let i=0; i<channel.length; i++) {
-				channel[i] = Math.random() - 0.5;
-			}
-		});
-		return true;
-	}
-}
-registerProcessor('noise-processor', NoiseProcessor);
+// 		output.forEach((channel) => {
+// 			for (let i=0; i<channel.length; i++) {
+// 				channel[i] = Math.random() - 0.5;
+// 			}
+// 		});
+// 		return true;
+// 	}
+// }
+// registerProcessor('noise-processor', NoiseProcessor);
 
 // A Downsampling Chiptune effect. Downsamples the signal by a specified amount
 // Resulting in a lower samplerate, making it sound more like 8bit/chiptune
@@ -69,6 +69,19 @@ registerProcessor('downsampler-processor', DownSampleProcessor);
 // distortion is applied on the overdrive parameter
 //
 class TanhDistortionProcessor extends AudioWorkletProcessor {
+	static get parameterDescriptors(){
+		return [{
+			name: 'amount',
+			defaultValue: 4,
+			minValue: 1
+		}, {
+			name: 'makeup',
+			defaultValue: 0.5,
+			minValue: 0,
+			maxValue: 2
+		}]
+	}
+
 	constructor(){
 		super();
 	}
@@ -80,8 +93,10 @@ class TanhDistortionProcessor extends AudioWorkletProcessor {
 		if (input.length > 0){
 			for (let channel=0; channel<input.length; ++channel){
 				for (let i=0; i<input[channel].length; i++){
+					const a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];
+					const m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];
 					// simple waveshaping with tanh
-					output[channel][i] = Math.tanh(input[channel][i]);
+					output[channel][i] = Math.tanh(input[channel][i] * a) * m;
 				}
 			}
 		}

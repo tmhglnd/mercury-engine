@@ -15030,7 +15030,7 @@ const fxMap = {
 	'room' : (params) => {
 		return new Reverb(params);
 	},
-	'verb' : (params) => {
+	'hall' : (params) => {
 		return new Reverb(params);
 	},
 	'reverb' : (params) => {
@@ -15066,9 +15066,9 @@ const fxMap = {
 	'echo' : (params) => {
 		return new Delay(params);
 	},
-	'ppDelay' : (params) => {
-		return new PingPongDelay(params);
-	},
+	// 'ppDelay' : (params) => {
+	// 	return new PingPongDelay(params);
+	// },
 	// 'freeverb' : (params) => {
 	// 	return new FreeVerb(params);
 	// },
@@ -15086,32 +15086,52 @@ module.exports = fxMap;
 // Programmed with a custom AudioWorkletProcessor, see effects/Processors.js
 //
 const DownSampler = function(_params){
-	this._down = (_params[0])? Util.toArray(_params[0]) : [0.5];
-
+	// apply the default values and convert to arrays where necessary
+	_params = Util.mapDefaults(_params, [ 0.5, 1 ]);
+	this._down = Util.toArray(_params[0]);
+	this._wet = Util.toArray(_params[1]);
+	
 	// ToneAudioNode has all the tone effect parameters
 	this._fx = new Tone.ToneAudioNode();
+
+	// The crossfader mix
+	this._mix = new Tone.Add();
+	this._mixDry = new Tone.Gain(0).connect(this._mix.input);
+	// this._mixWet = new Tone.Gain(0.5).connect(this._mix.addend);
+	
 	// A gain node for connecting with input and output
-	this._fx.input = new Tone.Gain(1);
-	this._fx.output = new Tone.Gain(1);
+	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
+	this._fx.output = new Tone.Gain(1).connect(this._mix.addend);
+
 	// the fx processor
 	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('downsampler-processor');
+
 	// connect input, fx and output
 	this._fx.input.chain(this._fx.workletNode, this._fx.output);
 
 	this.set = function(c, time, bpm){
 		// some parameter mapping changing input range 0-1 to 1-inf
-		let p = this._fx.workletNode.parameters.get('down');
-		let d = Math.floor(1 / (1 - Util.clip(Util.getParam(this._down, c) ** 0.25, 0, 0.999)));
+		const p = this._fx.workletNode.parameters.get('down');
+		const d = Math.floor(1 / (1 - Util.clip(Util.getParam(this._down, c) ** 0.25, 0, 0.999)));
+
 		p.setValueAtTime(Util.assureNum(d), time);
+
+		const w = Util.clip(Util.getParam(this._wet, c), 0, 1);
+		this._fx.output.gain.setValueAtTime(w, time);
+		this._mixDry.gain.setValueAtTime(1 - w, time);
 	}
 
 	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._fx }
+		return { 'send' : this._fx, 'return' : this._mix }
 	}
 
 	this.delete = function(){
-		this._fx.disconnect();
-		this._fx.dispose();
+		const nodes = [ this._fx, this._mix, this._mixDry ];
+
+		nodes.forEach((n) => {
+			n.disconnect();
+			n.dispose();
+		});
 	}
 }
 
@@ -15120,37 +15140,63 @@ const DownSampler = function(_params){
 // distortion is applied on the overdrive parameter
 //
 const TanhDistortion = function(_params){
-	this._drive = (_params[0])? Util.toArray(_params[0]) : [4];
+	_params = Util.mapDefaults(_params, [ 4, 1 ]);
+	// apply the default values and convert to arrays where necessary
+	this._drive = Util.toArray(_params[0]);
+	this._wet = Util.toArray(_params[1]);
+
+	console.log('Distortion with:', this._drive, this._wet);
+
+	// The crossfader for wet-dry (originally implemented with CrossFade)
+	// this._mix = new Tone.CrossFade();
+	this._mix = new Tone.Add();
+	this._mixWet = new Tone.Gain(0).connect(this._mix.input);
+	this._mixDry = new Tone.Gain(1).connect(this._mix.addend);	
 
 	// ToneAudioNode has all the tone effect parameters
 	this._fx = new Tone.ToneAudioNode();
 	// A gain node for connecting with input and output
-	this._fx.input = new Tone.Gain(1);
-	this._fx.output = new Tone.Gain(1);
+	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
+	this._fx.output = new Tone.Gain(1).connect(this._mixWet);
+
 	// the fx processor
 	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('tanh-distortion-processor');
-	// connect input, fx and output
+
+	// connect input, fx, output and wetdry
 	this._fx.input.chain(this._fx.workletNode, this._fx.output);
 
 	this.set = function(c, time, bpm){
 		// drive amount, minimum drive of 1
-		const d = Util.assureNum(Math.max(1, Math.pow(Util.getParam(this._drive, c), 2) + 1));
+		const d = Util.assureNum(Math.max(0, Util.getParam(this._drive, c)) + 1);
+
 		// preamp gain reduction for linear at drive = 1
-		const p = 0.4;
+		const p = 0.8;
 		// makeup gain
-		const m = 1.0 / p / (d ** 0.6);
-		// set the input gain and output gain reduction
-		this._fx.input.gain.setValueAtTime(p * d, time);
-		this._fx.output.gain.setValueAtTime(m, time);
+		const m = 1.0 / (p * (d ** 1.1));
+
+		// set the parameters in the workletNode
+		const amount = this._fx.workletNode.parameters.get('amount');
+		amount.setValueAtTime(p * d * d, time);
+
+		const makeup = this._fx.workletNode.parameters.get('makeup');
+		makeup.setValueAtTime(m, time);
+
+		const wet = Util.clip(Util.getParam(this._wet, c), 0, 1);
+		this._mixWet.gain.setValueAtTime(wet);
+		this._mixDry.gain.setValueAtTime(1 - wet);
 	}
 
 	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._fx }
+		return { 'send' : this._fx, 'return' : this._mix }
 	}
 
 	this.delete = function(){
-		this._fx.disconnect();
-		this._fx.dispose();
+		let nodes = [ this._fx, this._mix, this._mixDry, this._mixWet ];
+
+		nodes.forEach((n) => {
+			n.disconnect();
+			n.dispose();
+		});
 	}
 }
 
@@ -17767,7 +17813,7 @@ const { WebMidi } = require("webmidi");
 // load extra AudioWorkletProcessors from file
 // transformed to inline with browserify brfs
 
-const fxExtensions = "\n// A white noise generator at -6dBFS to test AudioWorkletProcessor\n//\nclass NoiseProcessor extends AudioWorkletProcessor {\n\tprocess(inputs, outputs, parameters){\n\t\tconst output = outputs[0];\n\n\t\toutput.forEach((channel) => {\n\t\t\tfor (let i=0; i<channel.length; i++) {\n\t\t\t\tchannel[i] = Math.random() - 0.5;\n\t\t\t}\n\t\t});\n\t\treturn true;\n\t}\n}\nregisterProcessor('noise-processor', NoiseProcessor);\n\n// A Downsampling Chiptune effect. Downsamples the signal by a specified amount\n// Resulting in a lower samplerate, making it sound more like 8bit/chiptune\n// Programmed with a custom AudioWorkletProcessor, see effects/Processors.js\n//\nclass DownSampleProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [{\n\t\t\tname: 'down',\n\t\t\tdefaultValue: 8,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 2048\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t\t// the frame counter\n\t\tthis.count = 0;\n\t\t// sample and hold variable array\n\t\tthis.sah = [];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\t// if there is anything to process\n\t\tif (input.length > 0){\n\t\t\t// for the length of the sample array (generally 128)\n\t\t\tfor (let i=0; i<input[0].length; i++){\n\t\t\t\tconst d = (parameters.down.length > 1) ? parameters.down[i] : parameters.down[0];\n\t\t\t\t// for every channel\n\t\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\t\t// if counter equals 0, sample and hold\n\t\t\t\t\tif (this.count % d === 0){\n\t\t\t\t\t\tthis.sah[channel] = input[channel][i];\n\t\t\t\t\t}\n\t\t\t\t\t// output the currently held sample\n\t\t\t\t\toutput[channel][i] = this.sah[channel];\n\t\t\t\t}\n\t\t\t\t// increment sample counter\n\t\t\t\tthis.count++;\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('downsampler-processor', DownSampleProcessor);\n\n// A distortion algorithm using the tanh (hyperbolic-tangent) as a \n// waveshaping technique. Some mapping to apply a more equal loudness \n// distortion is applied on the overdrive parameter\n//\nclass TanhDistortionProcessor extends AudioWorkletProcessor {\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\t// simple waveshaping with tanh\n\t\t\t\t\toutput[channel][i] = Math.tanh(input[channel][i]);\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('tanh-distortion-processor', TanhDistortionProcessor);\n\n// A distortion/compression effect of an incoming signal\n// Based on an algorithm by Peter McCulloch\n// \nclass SquashProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 1024\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\t\t\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\t// (s * a) / ((s * a)^2 * 0.28 + 1) / √a\n\t\t\t\t\t// drive amount, minimum of 1\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\t// set the waveshaper effect\n\t\t\t\t\tconst s = input[channel][i];\n\t\t\t\t\tconst p = (s * a) / ((s * a) * (s * a) * 0.28 + 1.0);\n\t\t\t\t\toutput[channel][i] = p;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('squash-processor', SquashProcessor);";
+const fxExtensions = "\n// A white noise generator at -6dBFS to test AudioWorkletProcessor\n//\n// class NoiseProcessor extends AudioWorkletProcessor {\n// \tprocess(inputs, outputs, parameters){\n// \t\tconst output = outputs[0];\n\n// \t\toutput.forEach((channel) => {\n// \t\t\tfor (let i=0; i<channel.length; i++) {\n// \t\t\t\tchannel[i] = Math.random() - 0.5;\n// \t\t\t}\n// \t\t});\n// \t\treturn true;\n// \t}\n// }\n// registerProcessor('noise-processor', NoiseProcessor);\n\n// A Downsampling Chiptune effect. Downsamples the signal by a specified amount\n// Resulting in a lower samplerate, making it sound more like 8bit/chiptune\n// Programmed with a custom AudioWorkletProcessor, see effects/Processors.js\n//\nclass DownSampleProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [{\n\t\t\tname: 'down',\n\t\t\tdefaultValue: 8,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 2048\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t\t// the frame counter\n\t\tthis.count = 0;\n\t\t// sample and hold variable array\n\t\tthis.sah = [];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\t// if there is anything to process\n\t\tif (input.length > 0){\n\t\t\t// for the length of the sample array (generally 128)\n\t\t\tfor (let i=0; i<input[0].length; i++){\n\t\t\t\tconst d = (parameters.down.length > 1) ? parameters.down[i] : parameters.down[0];\n\t\t\t\t// for every channel\n\t\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\t\t// if counter equals 0, sample and hold\n\t\t\t\t\tif (this.count % d === 0){\n\t\t\t\t\t\tthis.sah[channel] = input[channel][i];\n\t\t\t\t\t}\n\t\t\t\t\t// output the currently held sample\n\t\t\t\t\toutput[channel][i] = this.sah[channel];\n\t\t\t\t}\n\t\t\t\t// increment sample counter\n\t\t\t\tthis.count++;\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('downsampler-processor', DownSampleProcessor);\n\n// A distortion algorithm using the tanh (hyperbolic-tangent) as a \n// waveshaping technique. Some mapping to apply a more equal loudness \n// distortion is applied on the overdrive parameter\n//\nclass TanhDistortionProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1\n\t\t}, {\n\t\t\tname: 'makeup',\n\t\t\tdefaultValue: 0.5,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 2\n\t\t}]\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\tconst m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];\n\t\t\t\t\t// simple waveshaping with tanh\n\t\t\t\t\toutput[channel][i] = Math.tanh(input[channel][i] * a) * m;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('tanh-distortion-processor', TanhDistortionProcessor);\n\n// A distortion/compression effect of an incoming signal\n// Based on an algorithm by Peter McCulloch\n// \nclass SquashProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 1024\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\t\t\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\t// (s * a) / ((s * a)^2 * 0.28 + 1) / √a\n\t\t\t\t\t// drive amount, minimum of 1\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\t// set the waveshaper effect\n\t\t\t\t\tconst s = input[channel][i];\n\t\t\t\t\tconst p = (s * a) / ((s * a) * (s * a) * 0.28 + 1.0);\n\t\t\t\t\toutput[channel][i] = p;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('squash-processor', SquashProcessor);";
 Tone.getContext().addAudioWorkletModule(URL.createObjectURL(new Blob([ fxExtensions ], { type: 'text/javascript' })));
 
 // Mercury main class controls Tone and loads samples
