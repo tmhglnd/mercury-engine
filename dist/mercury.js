@@ -16026,7 +16026,8 @@ class MonoMidi extends Sequencer {
 		}
 
 		// Midi specific parameters
-		this._note = [];		
+		this._note = [];	
+		this._midinote = [];	
 		this._velocity = [ 127, 0 ];
 		this._dur = [ 100 ];
 		this._cc = [];
@@ -16082,6 +16083,20 @@ class MonoMidi extends Sequencer {
 		// only play a note if the notes are provided in the function
 		// if (this._note.length > 0){
 
+		let noteOptions = { duration: d, velocity: g, time: sync };
+
+		// if a midinote is selected instead of note
+		// play the value without mapping
+		let m = Util.getParam(this._midinote, c);
+		if (m){
+			if (this._chord){
+				m = Util.lookup(this._midinote, c);
+				m = Util.toArray(m);
+			}
+			this._device.playNote(m, ch, noteOptions);
+			return;
+		}
+
 		// note as interval / octave coordinate
 		let o = Util.getParam(this._note[1], c);
 		let n = [];
@@ -16092,17 +16107,18 @@ class MonoMidi extends Sequencer {
 		} else {
 			i = [ Util.getParam(this._note[0], c) ];
 		}
+
+		// if the note is 'off' don't play the note
+		// useful when only CC or Programchange is needed
+		if (i[0] === 'off'){ return; }
 		
 		for (let x=0; x<i.length; x++){
 			// reconstruct midi note value, (0, 0) = 36
 			// convert to scale and include the octave
 			n[x] = Util.toMidi(i[x], o);
 		}
-		
 		// play the note(s)! updated for webmidi 3.x
-		this._device.playNote(n, ch, { duration: d, attack: g, time: sync });
-
-		// }
+		this._device.playNote(n, ch, noteOptions);
 	}
 
 	amp(g, r){
@@ -16125,6 +16141,10 @@ class MonoMidi extends Sequencer {
 
 	bend(b=[0]){
 		this._bend = Util.toArray(b);
+	}
+
+	midinote(n=[60]){
+		this._midinote = Util.toArray(n);
 	}
 
 	chord(c){
@@ -16157,7 +16177,14 @@ class MonoMidi extends Sequencer {
 		// send out midiclock messages to sync external devices
 		// on this specific midi output and channel
 		// this._sync;
-	}	
+	}
+	
+	delete(){
+		// delete super class
+		super.delete();
+
+		console.log('=> disposed MonoMidi()', this._device);
+	}
 }
 module.exports = MonoMidi;
 },{"./Sequencer.js":65,"./Util.js":66,"tone":44,"webmidi":55}],60:[function(require,module,exports){
