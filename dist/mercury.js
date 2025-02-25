@@ -16721,7 +16721,7 @@ class PolySample extends PolyInstrument {
 			this.sources[id].buffer = this._bufs.get(b);
 		} else {
 			// default sample if file does not exist
-			this.sources[id].buffer = this._bufs.get('kick_min');
+			this.sources[id].buffer = this._bufs.get('kick_909');
 		}
 		// the duration of the buffer in seconds
 		let dur = this.sources[id].buffer.duration;
