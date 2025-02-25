@@ -15479,10 +15479,35 @@ const LFO = function(_params){
 
 // A filter FX, choose between highpass, lowpass and bandpass
 // Set the cutoff frequency and Q factor
+// Optionally with extra arguments you can apply a modulation
 //
 const Filter = function(_params){
+	// parameter mapping changes based on amount of arguments
+	this._static = true;
+	if (_params.length < 4){
+		if (typeof _params[0] === 'string'){
+			_params = Util.mapDefaults(_params, ['low', 1200, 0.45]);
+		} else {
+			_params = [['low']].concat(Util.mapDefaults(_params, [1200, 0.45]));
+		}
+	}
+	else {
+		_params = Util.mapDefaults(_params, ['low', '1/1', 200, 3000, 0.45, 'sine', 0.5]);
+		this._static = false;
+	}
+
 	this._fx = new Tone.Filter();
 
+	// the following is only used if the parameters for modulation
+	// are added as arguments to the fx(filter) function
+	if (!this._static){
+		this._lfo = new Tone.LFO();
+		this._scale = new Tone.ScaleExp();
+		this._lfo.connect(this._scale);
+		this._scale.connect(this._fx.frequency);
+	}
+
+	// available filter types for the filter
 	this._types = {
 		'lo' : 'lowpass',
 		'low' : 'lowpass',
@@ -15491,32 +15516,107 @@ const Filter = function(_params){
 		'high' : 'highpass',
 		'highpass' : 'highpass',
 		'band' : 'bandpass',
-		'bandpass': 'bandpass'
+		'bandpass': 'bandpass',
 	}
 	if (this._types[_params[0]]){
 		this._fx.set({ type: this._types[_params[0]] });
 	} else {
-		Util.log(`'${_params[0]}' is not a valid filter type`);
+		console.log(`'${_params[0]}' is not a valid filter type. Defaults to lowpass`);
 		this._fx.set({ type: 'lowpass' });
 	}
 	this._fx.set({ rolloff: -24 });
 
-	this._cutoff = (_params[1]) ? Util.toArray(_params[1]) : [ 1000 ];
-	this._q = (_params[2]) ? Util.toArray(_params[2]) : [ 0.5 ];
-	this._rt = (_params[3]) ? Util.toArray(_params[3]) : [ 0 ];
+	// available waveforms for the LFO
+	this._waveMap = {
+		sine : 'sine',
+		// sineUp : 'sine',
+		// sineDown : 'sine',
+		saw : 'sawtooth',
+		sawUp: 'sawtooth',
+		sawDown: 'sawtooth',
+		up: 'sawtooth',
+		down: 'sawtooth',
+		// square : 'square',
+		// squareUp : 'square',
+		// squareDown : 'square',
+		// rect : 'square',
+		triangle : 'triangle',
+		tri : 'triangle',
+	}
 
 	this.set = function(c, time, bpm){
-		let f = Util.getParam(this._cutoff, c);
-		let r = 1 / (1 - Math.min(0.95, Math.max(0, Util.getParam(this._q, c))));
-		let rt = Util.divToS(Util.getParam(this._rt, c), bpm);
+		let _q;
+		// if the filter is static use the settings of frequency and resonance 
+		if (this._static){
+			let f = Util.getParam(_params[1], c);
+			_q = _params[2];
 
-		if (rt > 0){
-			this._fx.frequency.rampTo(f, rt, time);
-		} else {
 			this._fx.frequency.setValueAtTime(f, time);
+			// let rt = Util.divToS(Util.getParam(this._rt, c), bpm);
+		} else {
+			_q = _params[4];
+			let t = Util.divToS(Util.getParam(_params[1], c), bpm);
+			let f = 1 / t;
+			let lo = Util.clip(Util.getParam(_params[2], c), 5, 19000);
+			let hi = Util.clip(Util.getParam(_params[3], c), 5, 19000);
+
+			let w = Util.getParam(_params[5], c);
+			if (this._waveMap[w]){
+				w = this._waveMap[w];
+			} else {
+				if (isNaN(w)){
+					log(`${w} is not a valid waveshape. Defaults to sine`);
+					// default wave if wave does not exist
+					w = 'sine';
+				} else {
+					// w = value between 0 and 1, map to up, down, triangle 
+					// 0=down, 0.5=triangle, 1=up
+					switch(Math.floor(Util.clip(w, 0, 1)*2.99)){
+						case 0: 
+							// regular saw up
+							w = 'sawtooth'; break;
+						case 1:
+							w = 'sine'; break;
+						case 2:
+							w = 'sawtooth';
+							// swap hi/lo range for saw down effect
+							let tmp = lo; lo = hi; hi = tmp; break;
+					}
+				}
+			}
+			this._lfo.set({ type: w });
+
+			let exp = Util.clip(Util.getParam(_params[6], c), 0.01, 100);
+
+			this._scale.min = lo;
+			this._scale.max = hi;
+			this._scale.exponent = exp;
+			this._lfo.frequency.setValueAtTime(f, time);
+
+			this._lfo.max = 1;
+
+			if (this._lfo.state !== 'started'){
+				switch (w) {
+					case 'sine' :
+						time += t * 0.25; break;
+					case 'triangle' :
+						time += t * 0.25; break;
+					case 'sawtooth' :
+						time += t * 0.5; break;
+				}	
+				this._lfo.start(time);
+			}
 		}
 
+		let r = 1 / (1 - Math.min(0.95, Math.max(0, Util.getParam(_q, c))));
 		this._fx.Q.setValueAtTime(r, time);
+
+		// ramptime removed now that modulation is possible
+		// if (rt > 0){
+		// 	this._fx.frequency.rampTo(f, rt, time);
+		// } else {
+		// 	this._fx.frequency.setValueAtTime(f, time);
+		// }
 	}
 
 	this.chain = function(){
@@ -15524,8 +15624,12 @@ const Filter = function(_params){
 	}
 
 	this.delete = function(){
-		this._fx.disconnect();
-		this._fx.dispose();
+		let nodes = [ this._fx, this._lfo, this._scale ];
+
+		nodes.forEach((n) => {
+			n?.disconnect();
+			n?.dispose();
+		});
 	}
 }
 
