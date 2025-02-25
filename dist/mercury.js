@@ -15328,15 +15328,18 @@ const Squash = function(_params){
 
 // Reverb FX
 // Add a reverb to the sound to give it a feel of space
+// Using a decaying noise reverb algorithm, that does seem to 
+// increase the memory usage over time slowly
 // 
 const Reverb = function(_params){
+	_params = Util.mapDefaults(_params, [ 0.5, 1.5 ]);
+	this._wet = _params[0];
+	this._size = _params[1];
+
 	this._fx = new Tone.Reverb();
 
-	this._wet = (_params[0] !== undefined)? Util.toArray(_params[0]) : [ 0.5 ];
-	this._size = (_params[1] !== undefined)? Util.toArray(_params[1]) : [ 1.5 ];
-
 	this.set = function(c, time){
-		let tmp = Math.min(10, Math.max(0.1, Util.getParam(this._size, c)));
+		let tmp = Math.min(15, Math.max(0.1, Util.getParam(this._size, c)));
 		if (this._fx.decay != tmp){
 			this._fx.decay = tmp; 
 		}
@@ -15357,19 +15360,21 @@ const Reverb = function(_params){
 
 // PitchShift FX
 // Shift the pitch up or down with semitones
+// Utilizes the default PitchShift FX from ToneJS
 // 
 const PitchShift = function(_params){
-	this._fx = new Tone.PitchShift();
+	_params = Util.mapDefaults(_params, [ -12, 1 ]);
+	// apply the default values and convert to arrays where necessary
+	this._pitch = _params[0];
+	this._wet = _params[1];
 
-	this._pitch = (_params[0] !== undefined)? Util.toArray(_params[0]) : [-12];
-	this._wet = (_params[1] !== undefined)? Util.toArray(_params[1]) : [1];
+	this._fx = new Tone.PitchShift();
 
 	this.set = function(c, time){
 		let p = Util.getParam(this._pitch, c);
 		let w = Util.getParam(this._wet, c);
 
 		this._fx.pitch = TL.toScale(p);
-		// this._fx.pitch = p;
 		this._fx.wet.setValueAtTime(w, time);
 	}
 
@@ -15387,47 +15392,73 @@ const PitchShift = function(_params){
 // a Low Frequency Oscillator effect, control tempo, type and depth
 //
 const LFO = function(_params){
+	_params = Util.mapDefaults(_params, [ '1/8', 'sine', 1 ]);
+	_params = _params.map(x => Util.toArray(x));
+	this._speed = _params[0];
+	this._type = _params[1];
+	this._depth = _params[2];
+
 	this._waveMap = {
 		sine : 'sine',
-		saw : 'sawtooth',
+		sineUp : 'sine',
+		sineDown : 'sine',
+		sawUp: 'sawtooth',
+		sawDown: 'sawtooth',
+		up: 'sawtooth',
+		down: 'sawtooth',
 		square : 'square',
+		squareUp : 'square',
+		squareDown : 'square',
 		rect : 'square',
 		triangle : 'triangle',
 		tri : 'triangle',
-		up: 'sawtooth',
-		sawUp: 'sawtooth'
 	}
 
 	this._lfo = new Tone.LFO();
 	this._fx = new Tone.Gain();
 	this._lfo.connect(this._fx.gain);
-	// this._fx = new Tone.Tremolo('8n').start();
-
-	this._speed = (_params[0]) ? Util.toArray(_params[0]) : ['1/8'];
-	this._type = (_params[1]) ? Util.toArray(_params[1]) : ['sine'];
-	this._depth = (_params[2] !== undefined) ? Util.toArray(_params[2]) : [ 1 ];
 
 	this.set = function(c, time, bpm){
 		let w = Util.getParam(this._type, c);
-		if (this._waveMap[w]){
-			w = this._waveMap[w];
-		} else {
+		if (!this._waveMap[w]){
 			Util.log(`'${w} is not a valid waveshape`);
 			// default wave if wave does not exist
 			w = 'sine';
 		}
-		this._lfo.set({ type: w });
+		this._lfo.set({ type: this._waveMap[w] });
 		
 		let s = Util.getParam(this._speed, c);
-		let f = Math.max(0.0001, Util.divToS(s, bpm));
+		let t = Util.divToS(s, bpm);
+		let f = Math.max(0.0001, t);
 		this._lfo.frequency.setValueAtTime(1/f, time);
 
 		let a = Util.getParam(this._depth, c);
-		this._lfo.min = Math.min(1, Math.max(0, 1 - a));	
+		this._lfo.min = Math.min(1, Math.max(0, 1 - a));
+		this._lfo.max = 1;
+		
+		// fix for squarewave not going to 0 fully
+		if (this._waveMap[w] === 'square'){ 
+			this._lfo.min += -0.1;
+		}
+
+		// swap high and low point to create a saw down
+		if (w === 'down' || w === 'sawDown' || w === 'squareUp' || w === 'sineDown' ){
+			let tmp = this._lfo.min;
+			this._lfo.min = this._lfo.max;
+			this._lfo.max = tmp;
+		} 
+
 		if (this._lfo.state !== 'started'){
-			if (w === 'sawtooth') {
-				this._lfo.phase = 180;
-			}
+			// fix incorrect phases for sawtooth sine and triangle
+			// simply by starting them a bit later.
+			switch (this._waveMap[w]) {
+				case 'sine' :
+					time += t * 0.25; break;
+				case 'triangle' :
+					time += t * 0.25; break;
+				case 'sawtooth' :
+					time += t * 0.5; break;
+			}	
 			this._lfo.start(time);
 		}
 	}
