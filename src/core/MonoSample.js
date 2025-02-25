@@ -41,16 +41,19 @@ class MonoSample extends Instrument {
 			// clean-up previous buffer
 			this.sample.buffer.dispose();
 		}
+
+		if (!this._bufs.has(f)){	
+			Util.log(`${w} is not a valid sample name`);
+			// defaul sample if file doesn not exist
+			f = 'kick_909';
+		} 
+		
 		if (this._bufs.has(f)){	
 			this.sample.buffer = this._bufs.get(f);
-			// this.sample.buffer = this._bufs.get(f).slice(0);
 		} else {
 			// default sample if file does not exist
-			this.sample.buffer = this._bufs.get('kick_min');
-			// this.sample.buffer = this._bufs.get('kick_min').slice(0);
+			this.sample.buffer = this._bufs.get('kick_909');
 		}
-		// the duration of the buffer in seconds
-		let dur = this.sample.buffer.duration;
 
 		// get speed and if 2d array pick randomly
 		let s = Util.getParam(this._speed, c);
@@ -73,6 +76,8 @@ class MonoSample extends Instrument {
 		// it becomes normal playback again) no fix yet
 		// this.sample.reverse = s < 0.0;
 
+		// the duration of the buffer in seconds
+		let dur = this.sample.buffer.duration;
 		let l = Util.lookup(this._stretch, c);
 		let n = 1;
 		if (l){
@@ -144,7 +149,12 @@ class MonoSample extends Instrument {
 		// delete super class
 		super.delete();
 		// disconnect the sound dispose the player
+		this.source.stop();
+		this.source.disconnect();
 		this.source.dispose();
+
+		this.sample.stop();
+		this.sample.disconnect();
 		this.sample.dispose();
 
 		console.log('=> disposed MonoSample()', this._sound);
