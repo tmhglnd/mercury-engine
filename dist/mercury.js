@@ -16469,10 +16469,10 @@ module.exports = MonoSynth;
 },{"./Instrument":57,"./Util.js":66,"tone":44,"total-serialism":47}],62:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
-const fxMap = require('./Effects.js');
-const TL = require('total-serialism').Translate;
-// const Sequencer = require('./Sequencer.js');
 const Instrument = require('./Instrument.js');
+// const fxMap = require('./Effects.js');
+// const TL = require('total-serialism').Translate;
+// const Sequencer = require('./Sequencer.js');
 
 // Basic class for a poly-instrument
 class PolyInstrument extends Instrument {
@@ -16580,15 +16580,17 @@ class PolyInstrument extends Instrument {
 					let dec = Util.divToS(Util.lookup(this._sus, c), this.bpm());
 					let rel = Util.divToS(Util.lookup(this._rel, c), this.bpm());
 		
-					this.adsrs[i].attack = att;
+					this.adsrs[i].attack = Math.max(0.001, att);
 					this.adsrs[i].decay = dec;
-					this.adsrs[i].release = rel;
+					this.adsrs[i].release = Math.max(0.001, rel);
 					
-					e = Math.min(this._time, att + dec + rel);
-			
+					// e = Math.min(this._time, att + dec + rel);
+					// let rt = Math.max(0.001, e - this.adsrs[i].release);
+					// this.adsrs[i].triggerAttackRelease(rt, time);
+
 					// trigger the envelope
-					let rt = Math.max(0.001, e - this.adsrs[i].release);
-					this.adsrs[i].triggerAttackRelease(rt, time);
+					this.adsrs[i].triggerAttack(time);
+					this.adsrs[i].triggerRelease(time + att + dec);
 				} else {
 					// if shape is off only trigger attack
 					// when voice stealing is 'off' this will lead to all 
@@ -16624,18 +16626,27 @@ class PolyInstrument extends Instrument {
 		// delete super class
 		super.delete();
 		// disconnect the sound dispose the player
-		// this.gain.dispose();
-		// this.panner.dispose();
+		this.gain.disconnect();
+		this.gain.dispose();
+		this.panner.disconnect();
+		this.panner.dispose();
 
-		this.adsrs.map((a) => a.dispose());
-		this.sources.map((s) => s.dispose());
+		this.adsrs.map((a) => {
+			a.disconnect();
+			a.dispose();
+		});
+		this.sources.map((s) => {
+			s.stop();
+			s.disconnect();
+			s.dispose();
+		});
 		// remove all fx
 		// this._fx.map((f) => f.delete());
 		console.log('=> disposed PolyInstrument() with FX:', this._fx);
 	}
 }
 module.exports = PolyInstrument;
-},{"./Effects.js":56,"./Instrument.js":57,"./Util.js":66,"tone":44,"total-serialism":47}],63:[function(require,module,exports){
+},{"./Instrument.js":57,"./Util.js":66,"tone":44}],63:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
 const PolyInstrument = require('./PolyInstrument.js');
