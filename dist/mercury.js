@@ -7373,13 +7373,21 @@ function traverseTree(tree, code, level, obj){
 			let inst = map['@inst'](el['@inst'], ccode);
 			delete el['@inst'];
 			
+			// generate unique ID name for object before checking the name()
+			// this ID is used for groups if there are any
+			inst.functions.name = [ uniqueID(8) ];
+			
 			Object.keys(el).forEach((k) => {
 				inst = map[k](el[k], ccode, '@object', inst);
 			});
+			// add the name to the all group
+			ccode.groups.all.push(inst.functions.name[0]);
+
 			// generate unique ID name for object if no name()
-			if (!inst.functions.name){
-				inst.functions.name = [ uniqueID(8) ];
-			}
+			// if (!inst.functions.name){
+			// 	inst.functions.name = [ uniqueID(8) ];
+			// }
+			// console.log('code', ccode);
 			// add object to complete code
 			ccode.objects[inst.functions.name] = inst;
 			return ccode;
@@ -7397,15 +7405,27 @@ function traverseTree(tree, code, level, obj){
 					inst = map[k](el[k], ccode, '@object', inst);
 				});
 				ccode.objects[inst.functions.name] = inst;
-			} else if (name === 'all'){
+			} else if (code.groups[name]){ //name === 'all' 
 				// if set all, set all instrument objects
-				Object.keys(ccode.objects).forEach((o) => {
+				code.groups[name].forEach((o) => {
 					let inst = ccode.objects[o];
-					Object.keys(el).forEach((k) => {
-						inst = map[k](el[k], ccode, '@object', inst);
-					});
-					ccode.objects[inst.functions.name] = inst;
+					if (inst){
+						Object.keys(el).forEach((k) => {
+							inst = map[k](el[k], ccode, '@object', inst);
+						});
+						ccode.objects[inst.functions.name] = inst;
+					}
 				});
+
+				// console.log(ccode.objects);
+
+				// Object.keys(ccode.objects).forEach((o) => {
+				// 	let inst = ccode.objects[o];
+				// 	Object.keys(el).forEach((k) => {
+				// 		inst = map[k](el[k], ccode, '@object', inst);
+				// 	});
+				// 	ccode.objects[inst.functions.name] = inst;
+				// });
 			} else {
 				// if name is part of global settings
 				let args;
@@ -7513,12 +7533,16 @@ function traverseTree(tree, code, level, obj){
 				if (func === 'add_fx'){
 					funcs[func].push(args);
 				} else {
-					if (func === 'name'){
-						ccode.groups.all.push(...args);
-					}
-					else if (func === 'group'){
-						// TO-DO:
-						// code for group functions
+					// if (func === 'name'){
+						// ccode.groups.all.push(...args);
+					// } else 
+					if (func === 'group'){
+						args.forEach((a) => {
+							// add empty array if the group doesn't exist yet
+							if (!ccode.groups[a]) { ccode.groups[a] = []; }
+							// add the name of the inst to the group array
+							ccode.groups[a].push(funcs.name[0]);
+						});
 					}
 					funcs[func] = args;
 				}
@@ -7868,6 +7892,40 @@ const functionMap = {
 		v[1] = Math.max(2, (Array.isArray(v[1])) ? v[1][0] : v[1]);
 		return Rand.expand(v[0], v[1]);
 	},
+	// markov chain methods
+	// combine the markovTrain with markovChain
+	// first train the model based on a list
+	// then generate a list output from the chain
+	'markovTrain' : (...v) => {
+		// generate markovchain from the incoming list
+		let markov = new Rand.DeepMarkovChain(...v);
+		// create string of data
+		let data = markov.stringify();
+		// clear data and delete
+		markov.clear();
+		markov = null;
+		// output the table as a string array to use for generating
+		return [ data ];
+	},
+	'markov' : (...v) => {
+		return functionMap['markovTrain'](...v);
+	},
+	'markovChain' : (...v) => {
+		// train from a markov table and generate a chain
+		let markov = new Rand.DeepMarkovChain();
+		markov.parse(v[1]);
+		// set the seed based on the global seed
+		markov.seed(Rand.getSeed());
+		let gen = markov.chain(v[0]);
+		// clear the data and remove markov
+		markov.clear();
+		markov = null;
+		// return generated array
+		return gen;
+	},
+	'chain' : (...v) => {
+		return functionMap['markovChain'](...v);
+	},
 	// 
 	// Transformational Methods
 	// 
@@ -8179,6 +8237,10 @@ const functionMap = {
 	'chordsNamed' : (...v) => {
 		return functionMap.chordsFromNames(v);
 	},
+	// translate text to ASCII
+	'textCode' : (...v) => {
+		return TL.textCode(...v);
+	},
 	// 
 	// Statistic Methods
 	// 
@@ -8289,7 +8351,49 @@ const functionMap = {
 	},
 	'ceil' : (v) => {
 		return Util.arrayCalc(v, 0, (a) => Math.ceil(a));
-	}
+	},
+	// compare two lists for equals
+	'equals' : (...v) => {
+		return Util.arrayCalc(v[0], v[1], (a,b) => Number(a === b));
+	},
+	'eq' : (...v) => {
+		return functionMap.equals(...v);
+	},
+	// compare two lists for not equal
+	'notEquals' : (...v) => {
+		return Util.arrayCalc(v[0], v[1], (a,b) => Number(a !== b));
+	},
+	'neq' : (...v) => {
+		return functionMap.notEquals(...v);
+	},
+	// compare left for greater than right list
+	'greater' : (...v) => {
+		return Util.arrayCalc(v[0], v[1], (a,b) => Number(a > b));	
+	},
+	'gt' : (...v) => {
+		return functionMap.greater(...v);
+	},
+	// compare left for greater than or equal to right list
+	'greaterEquals' : (...v) => {
+		return Util.arrayCalc(v[0], v[1], (a,b) => Number(a >= b));	
+	},
+	'gte' : (...v) => {
+		return functionMap.greaterEquals(...v);
+	},
+	// compare left for less than right list
+	'less' : (...v) => {
+		return Util.arrayCalc(v[0], v[1], (a,b) => Number(a < b));	
+	},
+	'lt' : (...v) => {
+		return functionMap.less(...v);
+	},
+	// compare left for less than or equal to right list
+	'lessEquals' : (...v) => {
+		return Util.arrayCalc(v[0], v[1], (a,b) => Number(a <= b));	
+	},
+	'lte' : (...v) => {
+		return functionMap.lessEquals(...v);
+	},
 }
 exports.functionMap = functionMap;
 },{"total-serialism":47}],33:[function(require,module,exports){
@@ -12208,9 +12312,11 @@ class MarkovChain {
 	read(t){
 		// read a markov chain table from a json file
 		if (Array.isArray(t) || typeof t !== 'object'){
-			return console.error(`Error: input is not a valid json formatted table. If your input is an array use train() instead.`);
+			console.error(`Error: input is not a valid json formatted table. If your input is an array use train() instead.`);
+			return false;
 		}
 		this._table = t;
+		return true;
 	}
 	clear(){
 		// empty the transition probabilities
@@ -12281,17 +12387,45 @@ exports.MarkovChain = MarkovChain;
 // @method chain() -> generate an array of values (default length=2)
 // 
 class DeepMarkov {
-	constructor(data){
+	constructor(data, order){
 		// transition probabilities table
 		this._table = new Map();
 		// train if dataset is provided
-		if (data) { this.train(data) };
+		if (data) { this.train(data, order) };
 		// current state of markov chain
 		this._state = '';
 	}
 	get table(){
-		// return copy of object
+		// return copy of Map object
 		return new Map(JSON.parse(JSON.stringify(Array.from(this._table))));
+	}
+	read(t){
+		// read a markov chain table from a Map() generated with DeepMarkov
+		if (Array.isArray(t) || t instanceof Map === false){
+			console.error(`Error: input is not a valid Map() formatted table. If your input is an array use train() instead.`);
+			return false;
+		}
+		this._table = t;
+		return true;
+	}
+	stringify(){
+		// return stringified version of the DeepMarkov table
+		return JSON.stringify(this._table, replacer);
+	}
+	parse(p){
+		// parse an incoming string to a Map() for transition table
+		try {
+			let parsed = JSON.parse(p, reviver);
+			if (parsed instanceof Map === false){
+				console.error(`Error: input is not a valid string that can be parsed to a Map().`)
+				return false;
+			}
+			this._table = parsed;
+			return true;
+		} catch (e) {
+			console.error(`Error: input is not a valid string that can be parsed to a Map().`);
+			return false;
+		}
 	}
 	clear(){
 		// empty the transition probabilities
@@ -12366,6 +12500,30 @@ class DeepMarkov {
 }
 exports.DeepMarkov = DeepMarkov;
 exports.DeepMarkovChain = DeepMarkov;
+
+// functions thanks to:
+// https://stackoverflow.com/questions/29085197/how-do-you-json-stringify-an-es6-map
+// helper function for Stringifying a Map() in DeepMarkov
+function replacer(key, value) {
+	if (value instanceof Map) {
+		return {
+			dataType: 'Map',
+			value: [...value]
+			// value: [Array.from(value.entries())], 
+		};
+	}
+	return value;
+}
+
+// helper function for parsing a Map() in DeepMarkov
+function reviver(key, value) {
+	if (typeof value === 'object' && value !== null) {
+		if (value.dataType === 'Map') {
+			return new Map(value.value);
+		}
+	}
+	return value;
+}
 },{"./gen-basic.js":48,"./statistic":51,"./transform.js":52,"./utility":54,"seedrandom":36}],51:[function(require,module,exports){
 //=======================================================================
 // statistic.js
@@ -13730,6 +13888,23 @@ function timevalueRatio(x){
 // Convert toneJS time values
 // function tonetimeRatio(x){
 // }
+
+// Convert a string or array of strings to the 
+// ASCII code values that belong to those characters
+// ASCII is the American Standard Code for Information Interchange
+// 
+// @param {String/Array} -> string to convert
+// @return {Array} -> array of integers
+//
+function textToCode(a=[0]){
+	if (!Array.isArray(a)){
+		return String(a).split('').map(c => c.charCodeAt(0));
+	}
+	return a.map(x => textToCode(x));
+}
+exports.textToCode = textToCode;
+exports.textCode = textToCode;
+exports.ttoc = textToCode;
 
 //=======================================================================
 // Scala class

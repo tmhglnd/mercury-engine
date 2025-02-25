@@ -33,7 +33,7 @@
   "author": "Timo Hoogland",
   "license": "ISC",
   "dependencies": {
-    "mercury-lang": "^1.9.7",
+    "mercury-lang": "^1.9.10",
     "tone": "^14.7.77",
     "webmidi": "^3.1.6"
   },
