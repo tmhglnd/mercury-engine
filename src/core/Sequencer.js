@@ -12,6 +12,7 @@ class Sequencer {
 		// Sequencer specific parameters
 		this._count = 0;
 		this._beatCount = 0;
+		this._subdivCnt = 0;
 		this._time = 1;
 		this._subdiv = [ 1 ];
 		this._offset = 0;
@@ -58,6 +59,9 @@ class Sequencer {
 			}
 			// set subdivision speeds
 			this._loop.playbackRate = Util.getParam(this._subdiv, this._count);
+
+			// get the subdivision count (always 0, except when subdividing)
+			this._subdivCnt = (this._subdivCnt + 1) % this._loop.playbackRate;
 	
 			// humanize method is interesting to add
 			this._loop.humanize = Util.getParam(this._human, this._count);
@@ -97,9 +101,12 @@ class Sequencer {
 						this._canvas.eval(Util.getParam(this._visual, c));
 					}
 				}
-	
+
 				// increment internal beat counter
-				this._beatCount++;
+				// only increment if ratchetcounter is 0
+				if (this._subdivCnt < 1) { 
+					this._beatCount++; 
+				}
 			}
 			// increment count for sequencing
 			this._count++;
@@ -117,7 +124,9 @@ class Sequencer {
 			// calculate the scheduling
 			let schedule = Tone.Time(this._offset).toSeconds();
 			// create new loop for synth
-			this._loop = new Tone.Loop((time) => { this._event(time) }, this._time).start(schedule);
+			this._loop = new Tone.Loop((time) => { 
+				this._event(time) 
+			}, this._time).start(schedule);
 		} 
 		// else {
 		// 	// generate a listener for the osc-address
