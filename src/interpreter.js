@@ -12,6 +12,7 @@ const PolySynth = require('./core/PolySynth.js');
 const PolySample = require('./core/PolySample.js');
 const Tempos = require('./data/genre-tempos.json');
 const Util = require('./core/Util.js');
+const { divToS } = require('./core/Util.js');
 
 class MercuryInterpreter {
 	constructor({ hydra, p5canvas } = {}){
@@ -40,12 +41,21 @@ class MercuryInterpreter {
 		return this.sounds;
 	}
 	
-	transferCounts(_s, s){
+	transferCounts(prevSounds, newSounds){
+		// transfer the time of the previous sound to the new sound object
+		// to preserve continuity when re-evaluating code
+		// first just go over all the existing instruments and transfer the counts
+		for (let s=0; s<prevSounds.length; s++){
+			if (newSounds[s]){
+				newSounds[s]._count = prevSounds[s]._count;
+				newSounds[s]._beatCount = prevSounds[s]._beatCount;
+			}
+		}	
 		// transfer the time of the previous sound to the new sound object
 		// to preserve continuity when re-evaluating code
 		// this works only for instruments that have a name()
-		_s.map((prev) => {
-			s.map((cur) => {
+		prevSounds.map((prev) => {
+			newSounds.map((cur) => {
 				if (cur._name === prev._name){
 					cur._count = prev._count;
 					cur._beatCount = prev._beatCount;
@@ -79,7 +89,9 @@ class MercuryInterpreter {
 
 	setCrossFade(f){
 		// set the crossFade in milliseconds
-		this.crossFade = Number(f) / 1000;
+		// set crossFade time in ms
+		this.crossFade = divToS(f, this.getBPM());
+		// this.crossFade = Number(f) / 1000;
 		Util.log(`Crossfade set to: ${f}ms`);
 	}
 
@@ -95,7 +107,7 @@ class MercuryInterpreter {
 		// parse and evaluate the inputted code
 		let c = (!file)? this._code : file;
 		
-		let t = Tone.Transport.seconds;
+		let t = window.performance.now();
 				
 		// is this necessary?
 		// as an asyncronous function with promise
@@ -105,7 +117,7 @@ class MercuryInterpreter {
 		// this.parse = await parser;
 		this.parse = Mercury(c);
 		
-		console.log(`Evaluated code in: ${((Tone.Transport.seconds-t) * 1000).toFixed(3)}ms`);
+		console.log(`Evaluated code in: ${(window.performance.now() - t).toFixed(1)}ms`);
 
 		this.tree = this.parse.parseTree;
 		this.errors = this.parse.errors;
@@ -131,7 +143,7 @@ class MercuryInterpreter {
 		});
 
 		// set timer to check evaluation time
-		t = Tone.Transport.seconds;
+		t = window.performance.now();
 
 		// Handle all the global settings here
 		const globalMap = {
@@ -288,8 +300,6 @@ class MercuryInterpreter {
 		this.makeLoops(this.sounds);
 		this.transferCounts(this._sounds, this.sounds);
 
-		console.log(`Instruments added in: ${((Tone.Transport.seconds - t) * 1000).toFixed(3)}ms`);		
-		
 		// when all loops started fade in the new sounds and fade out old
 		if (!this.sounds.length){
 			this.startSounds(this.sounds);
@@ -312,6 +322,9 @@ class MercuryInterpreter {
 				this.p5canvas.display();
 			});
 		}
+
+		console.log(`Instruments added in: ${(window.performance.now() - t).toFixed(1)}ms`);		
+		
 		// return the parsetree to see from outside
 		return this.parse;
 	}

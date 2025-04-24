@@ -27,7 +27,7 @@ class Sequencer {
 		this._event;
 		this._loop;
 		this._once = false;
-		this.makeLoop();
+		// this.makeLoop();
 
 		console.log('=> class Sequencer()');
 	}
