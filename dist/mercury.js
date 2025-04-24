@@ -18040,7 +18040,6 @@ class MercuryInterpreter {
 				return inst;
 			},
 			'synth' : (obj) => {		
-				console.log(obj);
 				let inst = new MonoSynth(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
@@ -18220,8 +18219,12 @@ class Mercury extends MercuryInterpreter {
 				// executes a callback from the class constructor
 				// if a callback is provided
 				if (onload){ onload(); }
+			},
+			onerror: () => {
+				console.error('Error loading audio file. Possibly internet is disconnected.');
 			}
 		});
+	
 		// this.buffers = new Tone.ToneAudioBuffers();
 		// this.addBuffers('https://raw.githubusercontent.com/tmhglnd/mercury-engine/main/src/data/samples.json', () => {
 		// 	console.log('Samples loaded', this.buffers._buffers.keys());

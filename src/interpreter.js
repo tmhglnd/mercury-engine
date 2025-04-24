@@ -216,7 +216,6 @@ class MercuryInterpreter {
 				return inst;
 			},
 			'synth' : (obj) => {		
-				console.log(obj);
 				let inst = new MonoSynth(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
