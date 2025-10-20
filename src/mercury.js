@@ -1,6 +1,6 @@
 
 console.log(`
-Mercury Engine by Timo Hoogland (c) 2023
+Mercury Engine by Timo Hoogland (c) 2018-2025
 	more info:
 	https://www.timohoogland.com
 	https://github.com/tmhglnd/mercury-playground
@@ -281,7 +281,7 @@ class Mercury extends MercuryInterpreter {
 
 	// set highpass frequency cutoff and ramptime
 	setHighPass(f, t=0){
-		this.highPass = (f === 'default')? 5 : f;
+		this.highPass = (f === 'default')? 20 : f;
 		t = Util.divToS(t, this.bpm);
 		if (t > 0){
 			this.highPassF.frequency.rampTo(this.highPass, t, Tone.now());

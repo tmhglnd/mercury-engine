@@ -124,14 +124,27 @@ class Instrument extends Sequencer {
 		this.gain.gain.rampTo(1, 0.005, Tone.now());
 	}
 
-	fadeOut(t){
-		// fade out the sound upon evaluation of new code
-		this.gain.gain.rampTo(0, t, Tone.now());
+	fadeOut(t, immediately=false){
+		// if immediately is true, fade-out immediately instead of waiting
+		let restTime = 0;
+
+		if (this._loop && !immediately){
+			// get the remaining time till the next trigger in the loop
+			// cancel the loop before that trigger happens and fade-out
+			restTime = (1 - this._loop.progress) * this._loop.interval;
+		}
 		
 		setTimeout(() => {
-			this.delete();
-			// wait a little bit extra before deleting to avoid clicks
-		}, t * 1000 + 100);
+			// stop the loop
+			if (this._loop) this._loop.mute = 1;
+			// fade out the sound upon evaluation of new code
+			this.gain.gain.rampTo(0, t, Tone.now());
+
+			setTimeout(() => {
+				this.delete();
+				// wait a little bit extra before deleting to avoid clicks
+			}, t * 1000 + 100);
+		}, restTime * 1000 - 25);
 	}
 
 	delete(){

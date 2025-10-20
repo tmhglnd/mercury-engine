@@ -16699,14 +16699,27 @@ class Instrument extends Sequencer {
 		this.gain.gain.rampTo(1, 0.005, Tone.now());
 	}
 
-	fadeOut(t){
-		// fade out the sound upon evaluation of new code
-		this.gain.gain.rampTo(0, t, Tone.now());
+	fadeOut(t, immediately=false){
+		// if immediately is true, fade-out immediately instead of waiting
+		let restTime = 0;
+
+		if (this._loop && !immediately){
+			// get the remaining time till the next trigger in the loop
+			// cancel the loop before that trigger happens and fade-out
+			restTime = (1 - this._loop.progress) * this._loop.interval;
+		}
 		
 		setTimeout(() => {
-			this.delete();
-			// wait a little bit extra before deleting to avoid clicks
-		}, t * 1000 + 100);
+			// stop the loop
+			if (this._loop) this._loop.mute = 1;
+			// fade out the sound upon evaluation of new code
+			this.gain.gain.rampTo(0, t, Tone.now());
+
+			setTimeout(() => {
+				this.delete();
+				// wait a little bit extra before deleting to avoid clicks
+			}, t * 1000 + 100);
+		}, restTime * 1000 - 25);
 	}
 
 	delete(){
@@ -17831,10 +17844,24 @@ class Sequencer {
 		return Tone.Transport.bpm.value;
 	}
 
-	makeLoop(){
+	makeLoop(stepCount, unnamedCount){
 		// dispose of previous loop if active
 		if (this._loop){
 			this._loop.dispose();
+		}
+
+		// transfer the stepcount to count and beatcount if provided
+		if (unnamedCount){
+			this._count = unnamedCount.count;
+			this._beatCount = unnamedCount.beat;
+		}		
+		// replace count if a name is given.
+		// this works through giving the instrument the same name
+		if (stepCount){
+			if (stepCount[this._name]){
+				this._count = stepCount[this._name].count;
+				this._beatCount = stepCount[this._name].beat;
+			}
 		}
 
 		// create the event for a loop or external trigger
@@ -17958,7 +17985,12 @@ class Sequencer {
 
 	delete(){
 		// dispose loop
+		this._loop?.stop();
 		this._loop?.dispose();
+		// remove the listenere if one was created
+		if (this._oscAddress){
+			window.removeEventListener(this._oscAddress, this._listener)
+		}
 		console.log('=> disposed Sequencer()');
 	}
 
@@ -18315,6 +18347,7 @@ const PolySample = require('./core/PolySample.js');
 const Tempos = require('./data/genre-tempos.json');
 const Util = require('./core/Util.js');
 const { divToS } = require('./core/Util.js');
+const { count } = require('total-serialism/src/gen-basic.js');
 
 class MercuryInterpreter {
 	constructor({ hydra, p5canvas } = {}){
@@ -18373,10 +18406,11 @@ class MercuryInterpreter {
 		});
 	}
 	
-	removeSounds(s, f=0) {
-		// fade out and delete after fade
+	removeSounds(s, f=0, im=false) {
+		// fade out and delete after fade. second parameter sets
+		// immediate fade-out, otherwise wait till trigger
 		s.map((_s) => {
-			if (_s){ _s.fadeOut(f); }
+			if (_s){ _s.fadeOut(f, im); }
 		});
 		// empty array to trigger garbage collection
 		s.length = 0;
@@ -18390,11 +18424,16 @@ class MercuryInterpreter {
 	}
 
 	setCrossFade(f){
-		// set the crossFade in milliseconds
-		// set crossFade time in ms
+		// set the crossFade time in milliseconds
 		this.crossFade = divToS(f, this.getBPM());
 		// this.crossFade = Number(f) / 1000;
-		Util.log(`Crossfade set to: ${f}ms`);
+		Util.log(`crossFade is deprecated, setting fadeOut time to ${this.crossFade}ms`);
+	}
+
+	setFadeOut(f){
+		// set the fadeOut time in milliseconds
+		this.crossFade = divToS(f, this.getBPM());
+		Util.log(`setting fadeOut time to ${this.crossFade}`);
 	}
 
 	getCode(){
@@ -18452,6 +18491,10 @@ class MercuryInterpreter {
 			'crossFade' : (args) => {
 				// set crossFade time in ms
 				this.setCrossFade(args[0]);
+			},
+			'fadeOut' : (args) => {
+				// set fadeOut time in ms
+				this.setFadeOut(args[0]);
 			},
 			'tempo' : (args) => {
 				let t = args[0];
@@ -18584,7 +18627,8 @@ class MercuryInterpreter {
 		}
 
 		// copy current sounds over to past
-		this._sounds = this.sounds.slice();
+		// this._sounds = this.sounds.slice();
+		this._sounds = [ ...this.sounds ];
 		// empty new sounds array
 		this.sounds = [];
 
@@ -18598,16 +18642,30 @@ class MercuryInterpreter {
 			}
 		}
 
+		// get all the current counts and store in dict
+		let countTransfer = {};
+		this._sounds.map((s) => {
+			countTransfer[s._name] = {
+				count: s._count,
+				beat: s._beatCount
+			}
+		});
+
+		// create new loops, transfer the counts
+		for (let s = 0; s < this.sounds.length; s++){
+			this.sounds[s].makeLoop(countTransfer, Object.values(countTransfer)[s]);
+		}
+
 		// start new loops;
-		this.makeLoops(this.sounds);
-		this.transferCounts(this._sounds, this.sounds);
+		// this.makeLoops(this.sounds);
+		// this.transferCounts(this._sounds, this.sounds);
 
 		// when all loops started fade in the new sounds and fade out old
-		if (!this.sounds.length){
-			this.startSounds(this.sounds);
-		}
-		this.startSounds(this.sounds, this.crossFade);
+		// if (!this.sounds.length){
+			// 	this.startSounds(this.sounds);
+			// }
 		this.removeSounds(this._sounds, this.crossFade);
+		this.startSounds(this.sounds);
 
 		this.resume();
 
@@ -18632,10 +18690,10 @@ class MercuryInterpreter {
 	}
 }
 module.exports = { MercuryInterpreter }
-},{"./core/MonoInput.js":58,"./core/MonoMidi.js":59,"./core/MonoSample.js":60,"./core/MonoSynth.js":61,"./core/PolySample.js":63,"./core/PolySynth.js":64,"./core/Util.js":66,"./data/genre-tempos.json":67,"mercury-lang":27,"tone":44,"total-serialism":47}],69:[function(require,module,exports){
+},{"./core/MonoInput.js":58,"./core/MonoMidi.js":59,"./core/MonoSample.js":60,"./core/MonoSynth.js":61,"./core/PolySample.js":63,"./core/PolySynth.js":64,"./core/Util.js":66,"./data/genre-tempos.json":67,"mercury-lang":27,"tone":44,"total-serialism":47,"total-serialism/src/gen-basic.js":48}],69:[function(require,module,exports){
 
 console.log(`
-Mercury Engine by Timo Hoogland (c) 2023
+Mercury Engine by Timo Hoogland (c) 2018-2025
 	more info:
 	https://www.timohoogland.com
 	https://github.com/tmhglnd/mercury-playground
@@ -18916,7 +18974,7 @@ class Mercury extends MercuryInterpreter {
 
 	// set highpass frequency cutoff and ramptime
 	setHighPass(f, t=0){
-		this.highPass = (f === 'default')? 5 : f;
+		this.highPass = (f === 'default')? 20 : f;
 		t = Util.divToS(t, this.bpm);
 		if (t > 0){
 			this.highPassF.frequency.rampTo(this.highPass, t, Tone.now());

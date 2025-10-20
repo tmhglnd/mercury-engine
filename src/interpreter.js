@@ -13,6 +13,7 @@ const PolySample = require('./core/PolySample.js');
 const Tempos = require('./data/genre-tempos.json');
 const Util = require('./core/Util.js');
 const { divToS } = require('./core/Util.js');
+const { count } = require('total-serialism/src/gen-basic.js');
 
 class MercuryInterpreter {
 	constructor({ hydra, p5canvas } = {}){
@@ -71,10 +72,11 @@ class MercuryInterpreter {
 		});
 	}
 	
-	removeSounds(s, f=0) {
-		// fade out and delete after fade
+	removeSounds(s, f=0, im=false) {
+		// fade out and delete after fade. second parameter sets
+		// immediate fade-out, otherwise wait till trigger
 		s.map((_s) => {
-			if (_s){ _s.fadeOut(f); }
+			if (_s){ _s.fadeOut(f, im); }
 		});
 		// empty array to trigger garbage collection
 		s.length = 0;
@@ -88,11 +90,16 @@ class MercuryInterpreter {
 	}
 
 	setCrossFade(f){
-		// set the crossFade in milliseconds
-		// set crossFade time in ms
+		// set the crossFade time in milliseconds
 		this.crossFade = divToS(f, this.getBPM());
 		// this.crossFade = Number(f) / 1000;
-		Util.log(`Crossfade set to: ${f}ms`);
+		Util.log(`crossFade is deprecated, setting fadeOut time to ${this.crossFade}ms`);
+	}
+
+	setFadeOut(f){
+		// set the fadeOut time in milliseconds
+		this.crossFade = divToS(f, this.getBPM());
+		Util.log(`setting fadeOut time to ${this.crossFade}`);
 	}
 
 	getCode(){
@@ -150,6 +157,10 @@ class MercuryInterpreter {
 			'crossFade' : (args) => {
 				// set crossFade time in ms
 				this.setCrossFade(args[0]);
+			},
+			'fadeOut' : (args) => {
+				// set fadeOut time in ms
+				this.setFadeOut(args[0]);
 			},
 			'tempo' : (args) => {
 				let t = args[0];
@@ -282,7 +293,8 @@ class MercuryInterpreter {
 		}
 
 		// copy current sounds over to past
-		this._sounds = this.sounds.slice();
+		// this._sounds = this.sounds.slice();
+		this._sounds = [ ...this.sounds ];
 		// empty new sounds array
 		this.sounds = [];
 
@@ -296,16 +308,30 @@ class MercuryInterpreter {
 			}
 		}
 
+		// get all the current counts and store in dict
+		let countTransfer = {};
+		this._sounds.map((s) => {
+			countTransfer[s._name] = {
+				count: s._count,
+				beat: s._beatCount
+			}
+		});
+
+		// create new loops, transfer the counts
+		for (let s = 0; s < this.sounds.length; s++){
+			this.sounds[s].makeLoop(countTransfer, Object.values(countTransfer)[s]);
+		}
+
 		// start new loops;
-		this.makeLoops(this.sounds);
-		this.transferCounts(this._sounds, this.sounds);
+		// this.makeLoops(this.sounds);
+		// this.transferCounts(this._sounds, this.sounds);
 
 		// when all loops started fade in the new sounds and fade out old
-		if (!this.sounds.length){
-			this.startSounds(this.sounds);
-		}
-		this.startSounds(this.sounds, this.crossFade);
+		// if (!this.sounds.length){
+			// 	this.startSounds(this.sounds);
+			// }
 		this.removeSounds(this._sounds, this.crossFade);
+		this.startSounds(this.sounds);
 
 		this.resume();
 
