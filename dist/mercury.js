@@ -3592,7 +3592,7 @@
   'use strict';
 
 /*
- *      bignumber.js v9.3.0
+ *      bignumber.js v9.3.1
  *      A JavaScript library for arbitrary-precision arithmetic.
  *      https://github.com/MikeMcl/bignumber.js
  *      Copyright (c) 2025 Michael Mclaughlin <M8ch88l@gmail.com>
@@ -4860,7 +4860,7 @@
 
         // Fixed-point notation.
         } else {
-          i -= ne;
+          i -= ne + (id === 2 && e > ne);
           str = toFixedPoint(str, e, '0');
 
           // Append zeros?
@@ -6703,18 +6703,28 @@ module.exports={
 // The default instrument objects for Mercury
 // 
 
-const emptyDefault = {
+const sequencerDefault = {
 	'empty' : {
 		'object' : '',
 		'type' : '',
 		'functions' : {
+			// 'name' : 	'',
+			// 'solo' : 	[ 0 ],
 			'group' :	[],
 			'time' : 	[ '1/1', 0 ],
+			// 'once' :	[ 'off' ],
 			'beat' : 	[ 1, -1 ],
-			'amp' :		[ 1 ],
 			'env' :		[ 1, 250 ],
+			'amp' :		[ 1 ],
+			// 'pan' :		[ 0 ],
+			'add_fx' : 	[],
+			// 'out' :		[ 1, 2 ],
+			// 'ratchet' : [ 0, 2 ],
+			// 'timediv' : [ ],
+			// 'human' :	[ 0 ],
+			// 'warp' :	[ 1 ],
+			// 'wait' :	[ 0 ],
 			'note' :	[ 0, 0 ],
-			'add_fx' : 	[]
 		}
 	},
 }
@@ -6746,6 +6756,12 @@ const instrumentDefaults = {
 			'note' :	[ 'off' ],
 			'tune' :	[ 60 ],
 			'pan' : 	[ 0 ]
+		}
+	},
+	'polySample' : {
+		'type' : 'kick_909',
+		'functions' : {
+			'note' :	[ 0, 2 ]
 		}
 	},
 	'loop' : {
@@ -6782,11 +6798,11 @@ const instrumentDefaults = {
 
 // merge the default empty object and the additional defaults
 Object.keys(instrumentDefaults).forEach((o) => {
-	let empty = JSON.parse(JSON.stringify(emptyDefault.empty));
+	let empty = JSON.parse(JSON.stringify(sequencerDefault.empty));
 	instrumentDefaults[o] = deepMerge(empty, instrumentDefaults[o]);
 });
 // add the empty default
-Object.assign(instrumentDefaults, emptyDefault);
+Object.assign(instrumentDefaults, sequencerDefault);
 // instrumentDefaults = { ...instrumentDefaults, ...emptyDefault };
 
 // Return true if input is object
@@ -7216,8 +7232,14 @@ function mercuryParser(code=''){
 				}
 				// only if not undefined
 				if (parser.results[0] !== undefined){
+					// add line number and code to new object if it is one
+					if (parser.results[0]?.['@object']?.['@new']){
+							parser.results[0]['@object']['@new']['@line'] = l+1;
+							// parser.results[0]['@object']['@new']['@code'] = lines[l];
+					}
 					// build the tokenized syntax tree
 					syntaxTree['@main'].push(parser.results[0]);
+
 				} else {
 					throw new Error();
 				}
@@ -7374,10 +7396,17 @@ function traverseTree(tree, code, level, obj){
 			let inst = map['@inst'](el['@inst'], ccode);
 			delete el['@inst'];
 			
+			// add the line number and code to the object for later use
+			inst.line = map['@line'](el['@line']);
+			delete el['@line'];
+
+			// inst.code = map['@code'](el['@code']);
+			// delete el['@code'];
+
 			// generate unique ID name for object before checking the name()
 			// this ID is used for groups if there are any
 			inst.functions.name = [ uniqueID(8) ];
-			
+
 			Object.keys(el).forEach((k) => {
 				inst = map[k](el[k], ccode, '@object', inst);
 			});
@@ -7573,21 +7602,13 @@ function traverseTree(tree, code, level, obj){
 			}
 			return el;
 		},
-		'@string' : (el) => {
-			return el;
-		},
-		'@number' : (el) => {
-			return el;
-		},
-		'@division' : (el) => {
-			return el;
-		},
-		'@note' : (el) => {
-			return el;
-		},
-		'@signal' : (el) => {
-			return el;
-		}
+		'@string' : (el) => { return el; },
+		'@number' : (el) => { return el; },
+		'@division' : (el) => { return el; },
+		'@note' : (el) => { return el; },
+		'@signal' : (el) => { return el; },
+		'@line' : (el) => { return el; },
+		'@code' : (el) => { return el; }
 	}
 
 	if (Array.isArray(tree)) {
@@ -10991,19 +11012,17 @@ function spreadFloat(len=1, lo=1, hi){
 	if (hi === undefined){ var t=lo, lo=0, hi=t; }
 	// calculate the range
 	let r = hi - lo; 
-	// lo is actual lowest value
-	lo = Math.min(lo, hi);
 	// len is minimum of 1 or length of array
 	len = size(len);
 	if (len === 1){ return [lo]; }
 	// stepsize
-	let s = Math.abs(r) / len;
+	let s = r / len;
 	// generate array
 	let arr = [];
 	for (let i=0; i<len; i++){
 		arr[i] = i * s + lo;
 	}
-	return (r < 0)? arr.reverse() : arr;
+	return arr;
 }
 exports.spreadFloat = spreadFloat;
 exports.spreadF = spreadFloat;
@@ -11032,8 +11051,6 @@ function spreadExpFloat(len=1, lo=1, hi, exp=1){
 	if (hi === undefined){ var t=lo, lo=0, hi=t; }
 	// calculate the range
 	let r = hi - lo; 
-	// lo is actual lowest value
-	lo = Math.min(lo, hi);
 	// len is minimum of 1
 	len = size(len);
 	// len = Math.max(1, len);
@@ -11041,9 +11058,9 @@ function spreadExpFloat(len=1, lo=1, hi, exp=1){
 	// generate array
 	let arr = [];
 	for (let i=0; i<len; i++){
-		arr[i] = Math.pow((i / len), exp) * Math.abs(r) + lo;
+		arr[i] = Math.pow((i / len), exp) * r + lo;
 	}
-	return (r < 0)? arr.reverse() : arr;
+	return arr;
 }
 exports.spreadFloatExp = spreadExpFloat; // deprecated
 exports.spreadExpFloat = spreadExpFloat;
@@ -11994,7 +12011,6 @@ exports.Automaton = Automaton;
 
 // require Generative methods
 const { spread } = require('./gen-basic.js');
-const { lookup } = require('./transform.js');
 const { fold, size, toArray } = require('./utility');
 const { change } = require('./statistic');
 
@@ -12003,7 +12019,8 @@ let seedrandom = require('seedrandom');
 
 // local pseudorandom number generator and seed storage
 let rng = seedrandom();
-let _seed = 0;
+let _seed = 0; 
+seed(_seed);
 
 // Set the seed for all the Random Number Generators. 
 // 0 sets to unpredictable seeding
@@ -12013,14 +12030,14 @@ let _seed = 0;
 // 
 function seed(v=0){
 	if (v === 0 || v === null || v === undefined){
-		rng = seedrandom();
-		_seed = 0;
+		// generate a random seed, which is retrievable
+		_seed = Math.floor(Math.random() * 9999) + 1;
 	} else {
-		rng = seedrandom(v);
 		_seed = v;
 	}
+	rng = seedrandom(_seed);
 	// also return the seed that has been set
-	return getSeed();
+	return _seed;
 }
 exports.seed = seed;
 
@@ -12575,7 +12592,7 @@ function reviver(key, value) {
 	}
 	return value;
 }
-},{"./gen-basic.js":48,"./statistic":51,"./transform.js":52,"./utility":54,"seedrandom":36}],51:[function(require,module,exports){
+},{"./gen-basic.js":48,"./statistic":51,"./utility":54,"seedrandom":36}],51:[function(require,module,exports){
 //=======================================================================
 // statistic.js
 // part of 'total-serialism' Package
@@ -12588,7 +12605,7 @@ function reviver(key, value) {
 
 const Mod = require('./transform');
 
-const { maximum, minimum, flatten, toArray } = require('./utility');
+const { maximum, minimum, flatten, toArray, lcm, gcd } = require('./utility');
 
 // sort an array of numbers or strings. sorts ascending
 // or descending in numerical and alphabetical order
@@ -12688,26 +12705,28 @@ exports.center = median;
 function mode(a=[0], d=true){
 	if (!Array.isArray(a)) { return a; }
 	if (d) { a = flatten(a); }
-
-	let arr = a.slice().sort((a,b) => { return a-b; });
-
-	let amount = 1;
-	let streak = 0;
+	
+	// get all the unique occurances and the amount of times they occur
+	let occurances = {};
+	a.forEach((o) => {
+		if (!occurances[o]){
+			occurances[o] = 0;
+		}
+		occurances[o]++;
+	});
+	// for all the items save the best streak (or streaks)
 	let modes = [];
-
-	for (let i=1; i<arr.length; i++){
-		if (arr[i-1] != arr[i]){
-			amount = 0;
+	let streak = 0;
+	Object.keys(occurances).forEach((o) => {
+		if (occurances[o] > streak){
+			streak = occurances[o];
+			modes = [o];
+		} else if (occurances[o] === streak){
+			modes.push(o);
 		}
-		amount++;
-		if (amount > streak){
-			streak = amount;
-			modes = [arr[i]];
-		} else if (amount == streak){
-			modes.push(arr[i]);
-		}
-	}
-	return modes;
+	});
+	// remap strings to numbers if possible
+	return modes.map(m => isNaN(m) ? m : Number(m));
 }
 exports.mode = mode;
 exports.common = mode;
@@ -12764,6 +12783,24 @@ exports.change = change;
 exports.delta = change;
 exports.difference = change;
 exports.diff = change;
+
+// Calculate the Greatest Common Divisor from an array
+// The function uses the algorithm described in _gcd() above
+// 
+// @param {Array} -> array to calculate on
+// @return {Int} -> greatest common divisor
+// 
+exports.greatestCommonDivisor = gcd;
+exports.gcd = gcd;
+
+// Calculate the Least Common Multiple from an array
+// the function uses the algorithm described in _lcd() above
+//
+// @param {Array} -> array to calculate on
+// @return {Int} -> least common multiple
+// 
+exports.leastCommonMultiple = lcm;
+exports.lcm = lcm;
 
 },{"./transform":52,"./utility":54}],52:[function(require,module,exports){
 //=======================================================================
@@ -13221,6 +13258,7 @@ function reverse(a=[0]){
 	return a.slice().reverse();
 }
 exports.reverse = reverse;
+exports.rev = reverse;
 
 // rotate the position of items in an array 
 // 1 = direction right, -1 = direction left
@@ -13240,6 +13278,7 @@ function rotate(a=[0], r=0){
 	return arr;
 }
 exports.rotate = rotate;
+exports.rot = rotate;
 
 // placeholder for the sort() method found in 
 // statistic.js
@@ -13326,19 +13365,33 @@ function spray(values=[0], beats=[0]){
 }
 exports.spray = spray;
 
-// Alternate through 2 or multiple lists consecutively
-// Gives a similar result as lace except the output
-// length is the lowest common denominator of the input lists
+// Merge 2 or multiple lists by alternating over them.
+// The output length is the lowest common multiple of the input lists,
 // so that every combination of consecutive values is included
+// until they all appeared an integer multiple of times.
+// This function is used to allow arrays as input for Generators
+// And for the step function for algorithmic composition
+//
+// @param {Array0, Array1, ..., Array-n} -> arrays to alternate/interleave
+// @return {Array} -> outputs a 2D array of the results
+//
+exports.stepMerge = arrayCombinations;
+
+// Combine 2 or multiple lists by alternating over them.
+// Gives a similar result as lace except the output
+// length is the lowest common multiple of the input lists
+// so that every combination of consecutive values is included.
+// A higher dimension in the array is preserved.
 //
 // @param {Array0, Array1, ..., Array-n} -> arrays to interleave
 // @return {Array} -> array of results 1 dimension less
 //
-function step(...arrs){
+function stepCombine(...arrs){
 	if (!arrs.length){ return [ 0 ] }
 	return flat(arrayCombinations(...arrs), 1);
 }
-exports.step = step;
+exports.stepCombine = stepCombine;
+exports.step = stepCombine;
 
 // stretch (or shrink) an array of numbers to a specified length
 // interpolating the values to fill in the gaps. 
@@ -13377,6 +13430,7 @@ exports.stretch = stretch;
 // filter duplicate items from an array
 // does not account for 2-dimensional arrays in the array
 exports.unique = unique;
+exports.thin = unique;
 
 },{"./statistic":51,"./utility":54}],53:[function(require,module,exports){
 //==============================================================================
@@ -14620,9 +14674,13 @@ exports.arrayCalc = arrayCalc;
 // Call a list function with provided arguments
 // The difference is that first all the possible combinations of the arrays
 // are calculated allowing arrays as arguments to generate
-// multiple versions of the function and joining them together
+// multiple versions of the function and joining them together afterwards
 //
-function multiCall(func, ...a){
+// @params {Function} -> The function name to use
+// @params {Arguments} -> The arguments applied to the function
+// @return {Anything} -> The result of the multi evaluated function
+// 
+function multiEval(func, ...a){
 	// calculate the array combinations
 	let args = arrayCombinations(...a);
 	// call the function for all the argument combinations
@@ -14631,26 +14689,27 @@ function multiCall(func, ...a){
 	let out = flatten(args, 1);
 	return out;
 }
-exports.multiCall = multiCall;
+exports.multiEval = multiEval;
+exports.multiCall = multiEval;
 
 // Alternate through 2 or multiple lists consecutively
-// The output length is the lowest common denominator of the input lists
+// The output length is the lowest common multiple of the input lists
 // so that every combination of consecutive values is included
+// until they all appeared an integer multiple of times.
 // This function is used to allow arrays as input for Generators
 // And for the step function for algorithmic composition
 //
-// @param {Array0, Array1, ..., Array-n} -> arrays to interleave
+// @param {Array0, Array1, ..., Array-n} -> arrays to alternate/interleave
 // @return {Array} -> outputs a 2D array of the results
 //
 function arrayCombinations(...arrs){
 	// make sure all items are an array of at least 1 item
 	arrs = arrs.map(a => toArray(a));
-	// get the lengths, but remove duplicate lengths
-	let sizes = unique(arrs.map(a => a.length));
-	// multiply to get total of possible iterations
-	let iters = 1;	
-	sizes.forEach((l) => iters *= l);
-	// iterate over the total amount pushing the items to array
+	// get the lengths, minimum of 1
+	let sizes = arrs.map(a => Math.max(1, a.length));
+	// get the least common multiple
+	let iters = lcm(sizes);	
+	// iterate over the total length, pushing the items to array
 	let arr = [];
 	for (let i=0; i<iters; i++){
 		arr.push(arrs.map((e) => {
@@ -14660,6 +14719,67 @@ function arrayCombinations(...arrs){
 	return arr;
 }
 exports.arrayCombinations = arrayCombinations;
+
+// Calculate the Greatest Common Divisor between 2 numbers
+// Based on the Euclid Algorithm described in:
+// https://en.wikipedia.org/wiki/Greatest_common_divisor
+// 
+function _gcd(a, b){
+	// greatest common divisor found if b equals 0
+	if (b === 0){ return a; }
+	// swap inputs and apply a mod b
+	return _gcd(b, a % b);
+}
+
+// Calculate the Least Common Multiple between 2 numbers
+// Based on the algorithm using the GCD() described in:
+// https://en.wikipedia.org/wiki/Least_common_multiple
+// 
+function _lcm(a, b){
+	return Math.abs(a) * ( Math.abs(b) / _gcd(a, b) );
+}
+
+// Calculate the Greatest Common Divisor from an array
+// The function uses the algorithm described in _gcd() above
+// 
+// @param {Array} -> array to calculate on
+// @return {Int} -> greatest common divisor
+// 
+function gcd(a=[1]){
+	a = toArray(a);
+	// not enough values to calculate gcd
+	if (a.length < 2){ return a[0]; }
+
+	let _greatest = a[0];
+	// calculate gcd in pairs from the array
+	for (let i = 1; i < a.length; i++){
+		_greatest = _gcd(_greatest, a[i]);
+	}
+	return _greatest;
+}
+exports.greatestCommonDivisor = gcd;
+exports.gcd = gcd;
+
+// Calculate the Least Common Multiple from an array
+// the function uses the algorithm described in _lcd() above
+//
+// @param {Array} -> array to calculate on
+// @return {Int} -> least common multiple
+// 
+function lcm(a=[1]){
+	a = toArray(a);
+	// not enough values to calculate lcm
+	if (a.length < 2){ return a[0]; }
+
+	let _least = a[0];
+	// calculate lcm in pairs from the array
+	for (let i = 1; i < a.length; i++){
+		_least = _lcm(_least, a[i]);
+	}
+	return _least;
+}
+exports.leastCommonMultiple = lcm;
+exports.lcm = lcm;
 
 // flatten a multidimensional array. Optionally set the depth
 // for the flattening
@@ -15372,14 +15492,17 @@ const fxMap = {
 	'degrade' : (params) => {
 		return new DownSampler(params);
 	},
-	'room' : (params) => {
+	'converb' : (params) => {
 		return new Reverb(params);
+	},
+	'room' : (params) => {
+		return new DattorroReverb(params);
 	},
 	'hall' : (params) => {
-		return new Reverb(params);
+		return new DattorroReverb(params);
 	},
 	'reverb' : (params) => {
-		return new Reverb(params);
+		return new DattorroReverb(params);
 	},
 	'shift' : (params) => {
 		return new PitchShift(params);
@@ -15422,9 +15545,120 @@ const fxMap = {
 	},
 	'double' : (params) => {
 		return new Chorus(Util.mapDefaults(params, ['8/1', 8, 1]));
+	},
+	'vowel' : (params) => {
+		return new FormantFilter(params);
+	},
+	'formant' : (params) => {
+		return new FormantFilter(params);
+	},
+	'speak' : (params) => {
+		return new FormantFilter(params);
 	}
 }
 module.exports = fxMap;
+
+
+// A formant/vowel filter. With this filter you can imitate the vowels of human 
+// speech. 
+// 
+const FormantFilter = function(_params){
+	// default values for the effect and separate parameters
+	_params = Util.mapDefaults(_params, [ 'o', 0, 1, 1 ]);
+	this._vowel = _params[0];
+	this._slide = _params[1];
+	this._shift = _params[2];
+	this._wet = _params[3];
+
+	// the input and wetdry output nodes
+	this._fx = new Tone.Gain(1);	
+	this._mix = new Tone.Add();
+	this._mixWet = new Tone.Gain(0).connect(this._mix);
+	this._mixDry = new Tone.Gain(1).connect(this._mix.addend);
+	this._fx.connect(this._mixDry);
+
+	// data collected from various sources, please see the research on
+	// https://github.com/tmhglnd/vowel-formants-graph
+	this._formantData = {
+		"oo" : [ 299, 850,  2250, "book" ],
+		"u"  : [ 438, 998,  2250, "foot" ],
+		"oh" : [ 569, 856,  2410, "pot" ],
+		"uh" : [ 518, 1189, 2390, "bug" ],
+		"er" : [ 490, 1358, 1690, "bird" ],
+		"a"  : [ 730, 1102, 2440, "part" ],
+		"ae" : [ 660, 1702, 2410, "lap" ],
+		"e"  : [ 528, 1855, 2480, "let" ],
+		"i"  : [ 400, 2002, 2250, "bit" ],
+		"ee" : [ 270, 2296, 3010, "leap" ],
+		"o"  : [ 399, 709,  2420, "fold" ],
+		"oe" : [ 360, 1546, 2346, "you" ]
+	}
+	this._vowels = Object.keys(this._formantData);
+	
+	// a -12dB/octave lowpass filter for preserving low end
+	this._lopass = new Tone.Filter(85, 'lowpass', -12).connect(this._mixWet);
+	this._fx.connect(this._lopass);
+
+	// 3 bandpass biquadfilters for the formants
+	// mix the filters together to one output
+	this._formants = [];
+	for (let f=0; f<3; f++){
+		this._formants[f] = new Tone.Filter(this._formantData['o'][f], 'bandpass');
+		// parallel processing of the filters from the input
+		this._fx.connect(this._formants[f]);
+		this._formants[f].connect(this._mixWet);
+	}
+
+	this.set = function(c, time, bpm){
+		let v = Util.getParam(this._vowel, c);
+		let r = Util.divToS(Util.getParam(this._slide, c), bpm);
+		let s = Util.clip(Util.getParam(this._shift, c), 0.17, 6);
+		let w = Util.clip(Util.getParam(this._wet, c));
+
+		// get the formantdata from the object
+		let freqs = this._formantData['oo'];
+		v = (!isNaN(v)) ? 
+			this._vowels[Util.clip(v, 0, this._vowels.length)] : v;
+		// make sure vowel is a valid option
+		if (this._formantData.hasOwnProperty(v)){
+			freqs = this._formantData[v];
+		} else {
+			log(`fx(vowel): ${v} is not a valid vowel selection, using default "o"`);
+		}
+
+		// apply the frequencies, Q's and gain to the individual formant filters
+		for (let f=0; f<this._formants.length; f++){
+			// the frequency is the formant freq * shift factor
+			if (r > 0) {
+				this._formants[f].frequency.rampTo(freqs[f] * s, r, time);
+			} else {
+				this._formants[f].frequency.setValueAtTime(freqs[f] * s, time);
+			}
+			// Q = (Freq * Shift) / (BandWidthHz / 2)
+			// Default bandwidth set to 50Hz 
+			this._formants[f].Q.setValueAtTime(freqs[f] * s * 0.05, time);
+			// Apply gain compensation based on formant number, +18dB, +5, +2
+			this._formants[f].output.gain.setValueAtTime(18 * (0.31 ** f), time);
+		}
+		
+		// apply wetdry mix
+		this._mixWet.gain.setValueAtTime(w, time);
+		this._mixDry.gain.setValueAtTime(1 - w, time);
+	}
+
+	this.chain = function(){
+		return { 'send' : this._fx, 'return' : this._mix }
+	}
+
+	this.delete = function(){
+		const nodes = [ this._fx, this._mix, this._mixWet, this._mixDry, ...this._formants, this._lopass ];
+
+		nodes.forEach((n) => {
+			n.disconnect();
+			n.dispose();
+		});
+	}
+}
 
 // A Downsampling Chiptune effect. Downsamples the signal by a specified amount
 // Resulting in a lower samplerate, making it sound more like 8bit/chiptune
@@ -15471,7 +15705,7 @@ const DownSampler = function(_params){
 	}
 
 	this.delete = function(){
-		const nodes = [ this._fx, this._mix, this._mixDry ];
+		const nodes = [ this._fx.input, this._fx.output, this._fx, this._mix, this._mixDry ];
 
 		nodes.forEach((n) => {
 			n.disconnect();
@@ -15485,12 +15719,10 @@ const DownSampler = function(_params){
 // distortion is applied on the overdrive parameter
 //
 const TanhDistortion = function(_params){
-	_params = Util.mapDefaults(_params, [ 4, 1 ]);
+	_params = Util.mapDefaults(_params, [ 2, 1 ]);
 	// apply the default values and convert to arrays where necessary
 	this._drive = Util.toArray(_params[0]);
 	this._wet = Util.toArray(_params[1]);
-
-	console.log('Distortion with:', this._drive, this._wet);
 
 	// The crossfader for wet-dry (originally implemented with CrossFade)
 	// this._mix = new Tone.CrossFade();
@@ -15536,7 +15768,7 @@ const TanhDistortion = function(_params){
 	}
 
 	this.delete = function(){
-		let nodes = [ this._fx, this._mix, this._mixDry, this._mixWet ];
+		let nodes = [ this._fx.input, this._fx.output, this._fx, this._mix, this._mixDry, this._mixWet ];
 
 		nodes.forEach((n) => {
 			n.disconnect();
@@ -15664,7 +15896,7 @@ const Squash = function(_params){
 	}
 
 	this.delete = function(){
-		let nodes = [ this._fx, this._mix, this._mixDry ];
+		let nodes = [ this._fx.input, this._fx.output, this._fx, this._mix, this._mixDry ];
 
 		nodes.forEach((n) => {
 			n.disconnect();
@@ -15702,6 +15934,65 @@ const Reverb = function(_params){
 	this.delete = function(){
 		this._fx.disconnect();
 		this._fx.dispose();
+	}
+}
+
+// Dattorro Reverb FX
+// Good sound plate reverb emulation
+// Based on the paper by Jon Dattorro and the code from Khoin
+// https://ccrma.stanford.edu/~dattorro/EffectDesignPart1.pdf 
+// https://github.com/khoin/DattorroReverbNode 
+//
+const DattorroReverb = function(_params){
+	_params = Util.mapDefaults(_params, [ 0.5, 10, 0, 0.5 ]);
+	this._gain = Util.toArray(_params[0]);
+	this._size = Util.toArray(_params[1]);
+	// unused currently, but here for compatibility with Mercury4Max code
+	// this._slide = Util.toArray(_params[2]); 
+	this._wet = Util.toArray(_params[3]);
+
+	// The crossfader for wet-dry (originally implemented with CrossFade)
+	this._mix = new Tone.Add();
+	this._mixWet = new Tone.Gain(0).connect(this._mix);
+	this._mixDry = new Tone.Gain(1).connect(this._mix.addend);
+
+	// a custom tone audio node with input/output gain and worklet effect
+	this._fx = new Tone.ToneAudioNode();
+	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
+	this._fx.output = new Tone.Gain(1).connect(this._mixWet);
+	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('dattorro-reverb');
+	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+
+	this.set = (c, time) => {
+		const gn = Math.max(Util.getParam(this._gain, c), 0);
+		const meta = Util.clip(Util.getParam(this._size, c), 0, 20);
+		const wet = Util.clip(Util.getParam(this._wet, c));
+
+		const dc = Util.remap(meta, 0, 20, 0.01, 0.99, 0.8);
+		const df = Util.remap(meta, 0, 20, 0.2, 0.75, 0.5);
+		const dp = Util.remap(meta, 0, 20, 0.2, 0.65, 2.5);
+		const pd = Util.remap(meta, 0, 20, 700, 100);
+
+		this._fx.workletNode.parameters.get('decay').setValueAtTime(dc, time);
+		this._fx.workletNode.parameters.get('decayDiffusion1').setValueAtTime(df, time);
+		this._fx.workletNode.parameters.get('damping').setValueAtTime(dp, time);
+		this._fx.workletNode.parameters.get('preDelay').setValueAtTime(pd, time);
+
+		this._fx.workletNode.parameters.get('wet').setValueAtTime(gn * 0.7, time);
+		// this._fx.workletNode.parameters.get('dry').setValueAtTime(0.7, time);
+
+		// apply wetdry mix
+		this._mixWet.gain.setValueAtTime(wet, time);
+		this._mixDry.gain.setValueAtTime(1 - wet, time);
+	}
+
+	this.chain = () => {
+		return { 'send' : this._fx, 'return' : this._mix }
+	}
+
+	this.delete = () => {
+		const nodes = [ this._fx, this._mix, this._mixDry, this._fx.input, this._fx.output ];
+		nodes.forEach(n => { n.disconnect(); n.dispose() });
 	}
 }
 
@@ -17776,6 +18067,12 @@ function clip(v, l=0, h=1){
 	return Math.max(l, Math.min(h, v));
 }
 
+// scale values between an input and output range with exponent
+function remap(val=0, inLo=0, inHi=1, outLo=0, outHi=1, exp=1){
+	let temp = ((val - inLo) / (inHi - inLo)) ** exp;
+	return temp * (outHi - outLo) + outLo;
+}
+
 // make sure the output is a number, else output a default value
 function assureNum(v, d=1){
 	return isNaN(v) ? d : v;
@@ -17969,7 +18266,7 @@ function log(msg){
 	}
 }
 
-module.exports = { mapDefaults, atTime, atodb, dbtoa, clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }
+module.exports = { mapDefaults, atTime, atodb, dbtoa, clip, remap,assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }
 },{"tone":44,"total-serialism":47}],67:[function(require,module,exports){
 module.exports={
 	"uptempo" : 10,
@@ -18343,7 +18640,7 @@ const { WebMidi } = require("webmidi");
 // load extra AudioWorkletProcessors from file
 // transformed to inline with browserify brfs
 
-const fxExtensions = "\n// A white noise generator at -6dBFS to test AudioWorkletProcessor\n//\n// class NoiseProcessor extends AudioWorkletProcessor {\n// \tprocess(inputs, outputs, parameters){\n// \t\tconst output = outputs[0];\n\n// \t\toutput.forEach((channel) => {\n// \t\t\tfor (let i=0; i<channel.length; i++) {\n// \t\t\t\tchannel[i] = Math.random() - 0.5;\n// \t\t\t}\n// \t\t});\n// \t\treturn true;\n// \t}\n// }\n// registerProcessor('noise-processor', NoiseProcessor);\n\n// A Downsampling Chiptune effect. Downsamples the signal by a specified amount\n// Resulting in a lower samplerate, making it sound more like 8bit/chiptune\n// Programmed with a custom AudioWorkletProcessor, see effects/Processors.js\n//\nclass DownSampleProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [{\n\t\t\tname: 'down',\n\t\t\tdefaultValue: 8,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 2048\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t\t// the frame counter\n\t\tthis.count = 0;\n\t\t// sample and hold variable array\n\t\tthis.sah = [];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\t// if there is anything to process\n\t\tif (input.length > 0){\n\t\t\t// for the length of the sample array (generally 128)\n\t\t\tfor (let i=0; i<input[0].length; i++){\n\t\t\t\tconst d = (parameters.down.length > 1) ? parameters.down[i] : parameters.down[0];\n\t\t\t\t// for every channel\n\t\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\t\t// if counter equals 0, sample and hold\n\t\t\t\t\tif (this.count % d === 0){\n\t\t\t\t\t\tthis.sah[channel] = input[channel][i];\n\t\t\t\t\t}\n\t\t\t\t\t// output the currently held sample\n\t\t\t\t\toutput[channel][i] = this.sah[channel];\n\t\t\t\t}\n\t\t\t\t// increment sample counter\n\t\t\t\tthis.count++;\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('downsampler-processor', DownSampleProcessor);\n\n// A distortion algorithm using the tanh (hyperbolic-tangent) as a \n// waveshaping technique. Some mapping to apply a more equal loudness \n// distortion is applied on the overdrive parameter\n//\nclass TanhDistortionProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1\n\t\t}, {\n\t\t\tname: 'makeup',\n\t\t\tdefaultValue: 0.5,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 2\n\t\t}]\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\tconst m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];\n\t\t\t\t\t// simple waveshaping with tanh\n\t\t\t\t\toutput[channel][i] = Math.tanh(input[channel][i] * a) * m;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('tanh-distortion-processor', TanhDistortionProcessor);\n\n// A distortion/compression effect of an incoming signal\n// Based on an algorithm by Peter McCulloch\n// \nclass SquashProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 1024\n\t\t}, {\n\t\t\tname: 'makeup',\n\t\t\tdefaultValue: 0.5,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 2\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\t\t\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\t// (s * a) / ((s * a)^2 * 0.28 + 1) / √a\n\t\t\t\t\t// drive amount, minimum of 1\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\t// makeup gain\n\t\t\t\t\tconst m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];\n\t\t\t\t\t// set the waveshaper effect\n\t\t\t\t\tconst s = input[channel][i];\n\t\t\t\t\tconst x = s * a * 1.412;\n\t\t\t\t\toutput[channel][i] = (x / (x * x * 0.28 + 1.0)) * m * 0.708;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('squash-processor', SquashProcessor);";
+const fxExtensions = "\n// A white noise generator at -6dBFS to test AudioWorkletProcessor\n//\n// class NoiseProcessor extends AudioWorkletProcessor {\n// \tprocess(inputs, outputs, parameters){\n// \t\tconst output = outputs[0];\n\n// \t\toutput.forEach((channel) => {\n// \t\t\tfor (let i=0; i<channel.length; i++) {\n// \t\t\t\tchannel[i] = Math.random() - 0.5;\n// \t\t\t}\n// \t\t});\n// \t\treturn true;\n// \t}\n// }\n// registerProcessor('noise-processor', NoiseProcessor);\n\n// A Downsampling Chiptune effect. Downsamples the signal by a specified amount\n// Resulting in a lower samplerate, making it sound more like 8bit/chiptune\n// Programmed with a custom AudioWorkletProcessor, see effects/Processors.js\n//\nclass DownSampleProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [{\n\t\t\tname: 'down',\n\t\t\tdefaultValue: 8,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 2048\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t\t// the frame counter\n\t\tthis.count = 0;\n\t\t// sample and hold variable array\n\t\tthis.sah = [];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\t// if there is anything to process\n\t\tif (input.length > 0){\n\t\t\t// for the length of the sample array (generally 128)\n\t\t\tfor (let i=0; i<input[0].length; i++){\n\t\t\t\tconst d = (parameters.down.length > 1) ? parameters.down[i] : parameters.down[0];\n\t\t\t\t// for every channel\n\t\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\t\t// if counter equals 0, sample and hold\n\t\t\t\t\tif (this.count % d === 0){\n\t\t\t\t\t\tthis.sah[channel] = input[channel][i];\n\t\t\t\t\t}\n\t\t\t\t\t// output the currently held sample\n\t\t\t\t\toutput[channel][i] = this.sah[channel];\n\t\t\t\t}\n\t\t\t\t// increment sample counter\n\t\t\t\tthis.count++;\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('downsampler-processor', DownSampleProcessor);\n\n// A distortion algorithm using the tanh (hyperbolic-tangent) as a \n// waveshaping technique. Some mapping to apply a more equal loudness \n// distortion is applied on the overdrive parameter\n//\nclass TanhDistortionProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1\n\t\t}, {\n\t\t\tname: 'makeup',\n\t\t\tdefaultValue: 0.5,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 2\n\t\t}]\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\tconst m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];\n\t\t\t\t\t// simple waveshaping with tanh\n\t\t\t\t\toutput[channel][i] = Math.tanh(input[channel][i] * a) * m;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('tanh-distortion-processor', TanhDistortionProcessor);\n\n// A distortion/compression effect of an incoming signal\n// Based on an algorithm by Peter McCulloch\n// \nclass SquashProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 1024\n\t\t}, {\n\t\t\tname: 'makeup',\n\t\t\tdefaultValue: 0.5,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 2\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\t\t\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\t// (s * a) / ((s * a)^2 * 0.28 + 1) / √a\n\t\t\t\t\t// drive amount, minimum of 1\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\t// makeup gain\n\t\t\t\t\tconst m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];\n\t\t\t\t\t// set the waveshaper effect\n\t\t\t\t\tconst s = input[channel][i];\n\t\t\t\t\tconst x = s * a * 1.412;\n\t\t\t\t\toutput[channel][i] = (x / (x * x * 0.28 + 1.0)) * m * 0.708;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('squash-processor', SquashProcessor);\n\n// Dattorro Reverberator\n// Thanks to port by khoin, taken from:\n// https://github.com/khoin/DattorroReverbNode\n// based on the paper from Jon Dattorro:\n// https://ccrma.stanford.edu/~dattorro/EffectDesignPart1.pdf\n// with small modifications to work in Mercury\n//\n// In jurisdictions that recognize copyright laws, this software is to\n// be released into the public domain.\n\n// THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND.\n// THE AUTHOR(S) SHALL NOT BE LIABLE FOR ANYTHING, ARISING FROM, OR IN\n// CONNECTION WITH THE SOFTWARE OR THE DISTRIBUTION OF THE SOFTWARE.\n// \nclass DattorroReverb extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [\n\t\t\t[\"preDelay\", 0, 0, sampleRate - 1, \"k-rate\"],\n\t\t\t// [\"bandwidth\", 0.9999, 0, 1, \"k-rate\"],\t\n\t\t\t[\"inputDiffusion1\", 0.75, 0, 1, \"k-rate\"],\n\t\t\t[\"inputDiffusion2\", 0.625, 0, 1, \"k-rate\"],\n\t\t\t[\"decay\", 0.5, 0, 1, \"k-rate\"],\n\t\t\t[\"decayDiffusion1\", 0.7, 0, 0.999999, \"k-rate\"],\n\t\t\t[\"decayDiffusion2\", 0.5, 0, 0.999999, \"k-rate\"],\n\t\t\t[\"damping\", 0.005, 0, 1, \"k-rate\"],\n\t\t\t[\"excursionRate\", 0.5, 0, 2, \"k-rate\"],\n\t\t\t[\"excursionDepth\", 0.7, 0, 2, \"k-rate\"],\n\t\t\t[\"wet\", 0.7, 0, 2, \"k-rate\"],\n\t\t\t// [\"dry\", 0.7, 0, 2, \"k-rate\"]\n\t\t].map(x => new Object({\n\t\t\tname: x[0],\n\t\t\tdefaultValue: x[1],\n\t\t\tminValue: x[2],\n\t\t\tmaxValue: x[3],\n\t\t\tautomationRate: x[4]\n\t\t}));\n\t}\n\n\tconstructor(options) {\n\t\tsuper(options);\n\n\t\tthis._Delays = [];\n\t\t// Pre-delay is always one-second long, rounded to the nearest 128-chunk\n\t\tthis._pDLength = sampleRate + (128 - sampleRate % 128);\n\t\tthis._preDelay = new Float32Array(this._pDLength);\n\t\tthis._pDWrite = 0;\n\t\tthis._lp1 = 0.0;\n\t\tthis._lp2 = 0.0;\n\t\tthis._lp3 = 0.0;\n\t\tthis._excPhase = 0.0;\n\n\t\t[\n\t\t\t0.004771345, 0.003595309, 0.012734787, 0.009307483, // pre-tank\n\t\t\t0.022579886, 0.149625349, 0.060481839, 0.1249958, // left-loop\n\t\t\t0.030509727, 0.141695508, 0.089244313, 0.106280031 // right-loop\n\t\t].forEach(x => this.makeDelay(x));\n\n\t\tthis._taps = Int16Array.from([\n\t\t\t0.008937872, 0.099929438, 0.064278754, 0.067067639, \n\t\t\t0.066866033, 0.006283391, 0.035818689, // left-output\n\t\t\t0.011861161, 0.121870905, 0.041262054, 0.08981553, \n\t\t\t0.070931756, 0.011256342, 0.004065724 // right-output\n\t\t], x => Math.round(x * sampleRate));\n\t}\n\n\tmakeDelay(length) {\n\t\t// len, array, write, read, mask\n\t\tlet len = Math.round(length * sampleRate);\n\t\tlet nextPow2 = 2 ** Math.ceil(Math.log2((len)));\n\t\tthis._Delays.push([\n\t\t\tnew Float32Array(nextPow2), len - 1, 0 | 0, nextPow2 - 1\n\t\t]);\n\t}\n\n\twriteDelay(index, data) {\n\t\treturn this._Delays[index][0][this._Delays[index][1]] = data;\n\t}\n\n\treadDelay(index) {\n\t\treturn this._Delays[index][0][this._Delays[index][2]];\n\t}\n\n\treadDelayAt(index, i) {\n\t\tlet d = this._Delays[index];\n\t\treturn d[0][(d[2] + i) & d[3]];\n\t}\n\n\t// cubic interpolation\n\t// O. Niemitalo: \n\t// https://www.musicdsp.org/en/latest/Other/49-cubic-interpollation.html\n\treadDelayCAt(index, i) {\n\t\tlet d = this._Delays[index],\n\t\t\tfrac = i - ~~i,\n\t\t\tint = ~~i + d[2] - 1,\n\t\t\tmask = d[3];\n\n\t\tlet x0 = d[0][int++ & mask],\n\t\t\tx1 = d[0][int++ & mask],\n\t\t\tx2 = d[0][int++ & mask],\n\t\t\tx3 = d[0][int & mask];\n\n\t\tlet a = (3 * (x1 - x2) - x0 + x3) / 2,\n\t\t\tb = 2 * x2 + x0 - (5 * x1 + x3) / 2,\n\t\t\tc = (x2 - x0) / 2;\n\n\t\treturn (((a * frac) + b) * frac + c) * frac + x1;\n\t}\n\n\t// First input will be downmixed to mono if number of channels is not 2\n\t// Outputs Stereo.\n\tprocess(inputs, outputs, parameters) {\n\t\tconst pd = ~~parameters.preDelay[0],\n\t\t\t// bw = parameters.bandwidth[0], // replaced by using damping\n\t\t\tfi = parameters.inputDiffusion1[0],\n\t\t\tsi = parameters.inputDiffusion2[0],\n\t\t\tdc = parameters.decay[0],\n\t\t\tft = parameters.decayDiffusion1[0],\n\t\t\tst = parameters.decayDiffusion2[0],\n\t\t\tdp = 1 - parameters.damping[0],\n\t\t\tex = parameters.excursionRate[0] / sampleRate,\n\t\t\ted = parameters.excursionDepth[0] * sampleRate / 1000,\n\t\t\twe = parameters.wet[0]; //* 0.6, // lo & ro both mult. by 0.6 anyways\n\t\t\t// dr = parameters.dry[0];\n\n\t\t// write to predelay and dry output\n\t\tif (inputs[0].length == 2) {\n\t\t\tfor (let i = 127; i >= 0; i--) {\n\t\t\t\tthis._preDelay[this._pDWrite + i] = (inputs[0][0][i] + inputs[0][1][i]) * 0.5;\n\n\t\t\t\t// removed the dry parameter, this is handled in the Tone Node\n\t\t\t\t// outputs[0][0][i] = inputs[0][0][i] * dr;\n\t\t\t\t// outputs[0][1][i] = inputs[0][1][i] * dr;\n\t\t\t}\n\t\t} else if (inputs[0].length > 0) {\n\t\t\tthis._preDelay.set(\n\t\t\t\tinputs[0][0],\n\t\t\t\tthis._pDWrite\n\t\t\t);\n\t\t\t// for (let i = 127; i >= 0; i--)\n\t\t\t// \toutputs[0][0][i] = outputs[0][1][i] = inputs[0][0][i] * dr;\n\t\t} else {\n\t\t\tthis._preDelay.set(\n\t\t\t\tnew Float32Array(128),\n\t\t\t\tthis._pDWrite\n\t\t\t);\n\t\t}\n\n\t\tlet i = 0 | 0;\n\t\twhile (i < 128) {\n\t\t\tlet lo = 0.0,\n\t\t\t\tro = 0.0;\n\n\t\t\t// input damping (formerly known as bandwidth bw, now uses dp)\n\t\t\tthis._lp1 += dp * (this._preDelay[(this._pDLength + this._pDWrite - pd + i) % this._pDLength] - this._lp1);\n\n\t\t\t// pre-tank\n\t\t\tlet pre = this.writeDelay(0, this._lp1 - fi * this.readDelay(0));\n\t\t\tpre = this.writeDelay(1, fi * (pre - this.readDelay(1)) + this.readDelay(0));\n\t\t\tpre = this.writeDelay(2, fi * pre + this.readDelay(1) - si * this.readDelay(2));\n\t\t\tpre = this.writeDelay(3, si * (pre - this.readDelay(3)) + this.readDelay(2));\n\n\t\t\tlet split = si * pre + this.readDelay(3);\n\n\t\t\t// excursions\n\t\t\t// could be optimized?\n\t\t\tlet exc = ed * (1 + Math.cos(this._excPhase * 6.2800));\n\t\t\tlet exc2 = ed * (1 + Math.sin(this._excPhase * 6.2847));\n\n\t\t\t// left loop\n\t\t\t// tank diffuse 1\n\t\t\tlet temp = this.writeDelay(4, split + dc * this.readDelay(11) + ft * this.readDelayCAt(4, exc));\n\t\t\t// long delay 1\n\t\t\tthis.writeDelay(5, this.readDelayCAt(4, exc) - ft * temp);\n\t\t\t// damp 1\n\t\t\tthis._lp2 += dp * (this.readDelay(5) - this._lp2);\n\t\t\ttemp = this.writeDelay(6, dc * this._lp2 - st * this.readDelay(6)); // tank diffuse 2\n\t\t\t// long delay 2\n\t\t\tthis.writeDelay(7, this.readDelay(6) + st * temp);\n\n\t\t\t// right loop \n\t\t\t// tank diffuse 3\n\t\t\ttemp = this.writeDelay(8, split + dc * this.readDelay(7) + ft * this.readDelayCAt(8, exc2));\n\t\t\t// long delay 3\n\t\t\tthis.writeDelay(9, this.readDelayCAt(8, exc2) - ft * temp);\n\t\t\t// damp 2\n\t\t\tthis._lp3 += dp * (this.readDelay(9) - this._lp3);\n\t\t\t// tank diffuse 4\n\t\t\ttemp = this.writeDelay(10, dc * this._lp3 - st * this.readDelay(10));\n\t\t\t// long delay 4\n\t\t\tthis.writeDelay(11, this.readDelay(10) + st * temp);\n\n\t\t\tlo = this.readDelayAt(9, this._taps[0]) +\n\t\t\t\tthis.readDelayAt(9, this._taps[1]) -\n\t\t\t\tthis.readDelayAt(10, this._taps[2]) +\n\t\t\t\tthis.readDelayAt(11, this._taps[3]) -\n\t\t\t\tthis.readDelayAt(5, this._taps[4]) -\n\t\t\t\tthis.readDelayAt(6, this._taps[5]) -\n\t\t\t\tthis.readDelayAt(7, this._taps[6]);\n\n\t\t\tro = this.readDelayAt(5, this._taps[7]) +\n\t\t\t\tthis.readDelayAt(5, this._taps[8]) -\n\t\t\t\tthis.readDelayAt(6, this._taps[9]) +\n\t\t\t\tthis.readDelayAt(7, this._taps[10]) -\n\t\t\t\tthis.readDelayAt(9, this._taps[11]) -\n\t\t\t\tthis.readDelayAt(10, this._taps[12]) -\n\t\t\t\tthis.readDelayAt(11, this._taps[13]);\n\n\t\t\toutputs[0][0][i] += lo * we;\n\t\t\toutputs[0][1][i] += ro * we;\n\n\t\t\tthis._excPhase += ex;\n\n\t\t\ti++;\n\n\t\t\tfor (let j = 0, d = this._Delays[0]; j < this._Delays.length; d = this._Delays[++j]) {\n\t\t\t\td[1] = (d[1] + 1) & d[3];\n\t\t\t\td[2] = (d[2] + 1) & d[3];\n\t\t\t}\n\t\t}\n\n\t\t// Update preDelay index\n\t\tthis._pDWrite = (this._pDWrite + 128) % this._pDLength;\n\n\t\treturn true;\n\t}\n}\nregisterProcessor('dattorro-reverb', DattorroReverb);\n";
 Tone.getContext().addAudioWorkletModule(URL.createObjectURL(new Blob([ fxExtensions ], { type: 'text/javascript' })));
 
 // Mercury main class controls Tone and loads samples

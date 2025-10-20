@@ -29,6 +29,12 @@ function clip(v, l=0, h=1){
 	return Math.max(l, Math.min(h, v));
 }
 
+// scale values between an input and output range with exponent
+function remap(val=0, inLo=0, inHi=1, outLo=0, outHi=1, exp=1){
+	let temp = ((val - inLo) / (inHi - inLo)) ** exp;
+	return temp * (outHi - outLo) + outLo;
+}
+
 // make sure the output is a number, else output a default value
 function assureNum(v, d=1){
 	return isNaN(v) ? d : v;
@@ -222,4 +228,4 @@ function log(msg){
 	}
 }
 
-module.exports = { mapDefaults, atTime, atodb, dbtoa, clip, assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }
+module.exports = { mapDefaults, atTime, atodb, dbtoa, clip, remap,assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }

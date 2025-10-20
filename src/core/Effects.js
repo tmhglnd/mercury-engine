@@ -40,14 +40,17 @@ const fxMap = {
 	'degrade' : (params) => {
 		return new DownSampler(params);
 	},
-	'room' : (params) => {
+	'converb' : (params) => {
 		return new Reverb(params);
+	},
+	'room' : (params) => {
+		return new DattorroReverb(params);
 	},
 	'hall' : (params) => {
-		return new Reverb(params);
+		return new DattorroReverb(params);
 	},
 	'reverb' : (params) => {
-		return new Reverb(params);
+		return new DattorroReverb(params);
 	},
 	'shift' : (params) => {
 		return new PitchShift(params);
@@ -90,9 +93,120 @@ const fxMap = {
 	},
 	'double' : (params) => {
 		return new Chorus(Util.mapDefaults(params, ['8/1', 8, 1]));
+	},
+	'vowel' : (params) => {
+		return new FormantFilter(params);
+	},
+	'formant' : (params) => {
+		return new FormantFilter(params);
+	},
+	'speak' : (params) => {
+		return new FormantFilter(params);
 	}
 }
 module.exports = fxMap;
+
+
+// A formant/vowel filter. With this filter you can imitate the vowels of human 
+// speech. 
+// 
+const FormantFilter = function(_params){
+	// default values for the effect and separate parameters
+	_params = Util.mapDefaults(_params, [ 'o', 0, 1, 1 ]);
+	this._vowel = _params[0];
+	this._slide = _params[1];
+	this._shift = _params[2];
+	this._wet = _params[3];
+
+	// the input and wetdry output nodes
+	this._fx = new Tone.Gain(1);	
+	this._mix = new Tone.Add();
+	this._mixWet = new Tone.Gain(0).connect(this._mix);
+	this._mixDry = new Tone.Gain(1).connect(this._mix.addend);
+	this._fx.connect(this._mixDry);
+
+	// data collected from various sources, please see the research on
+	// https://github.com/tmhglnd/vowel-formants-graph
+	this._formantData = {
+		"oo" : [ 299, 850,  2250, "book" ],
+		"u"  : [ 438, 998,  2250, "foot" ],
+		"oh" : [ 569, 856,  2410, "pot" ],
+		"uh" : [ 518, 1189, 2390, "bug" ],
+		"er" : [ 490, 1358, 1690, "bird" ],
+		"a"  : [ 730, 1102, 2440, "part" ],
+		"ae" : [ 660, 1702, 2410, "lap" ],
+		"e"  : [ 528, 1855, 2480, "let" ],
+		"i"  : [ 400, 2002, 2250, "bit" ],
+		"ee" : [ 270, 2296, 3010, "leap" ],
+		"o"  : [ 399, 709,  2420, "fold" ],
+		"oe" : [ 360, 1546, 2346, "you" ]
+	}
+	this._vowels = Object.keys(this._formantData);
+	
+	// a -12dB/octave lowpass filter for preserving low end
+	this._lopass = new Tone.Filter(85, 'lowpass', -12).connect(this._mixWet);
+	this._fx.connect(this._lopass);
+
+	// 3 bandpass biquadfilters for the formants
+	// mix the filters together to one output
+	this._formants = [];
+	for (let f=0; f<3; f++){
+		this._formants[f] = new Tone.Filter(this._formantData['o'][f], 'bandpass');
+		// parallel processing of the filters from the input
+		this._fx.connect(this._formants[f]);
+		this._formants[f].connect(this._mixWet);
+	}
+
+	this.set = function(c, time, bpm){
+		let v = Util.getParam(this._vowel, c);
+		let r = Util.divToS(Util.getParam(this._slide, c), bpm);
+		let s = Util.clip(Util.getParam(this._shift, c), 0.17, 6);
+		let w = Util.clip(Util.getParam(this._wet, c));
+
+		// get the formantdata from the object
+		let freqs = this._formantData['oo'];
+		v = (!isNaN(v)) ? 
+			this._vowels[Util.clip(v, 0, this._vowels.length)] : v;
+		// make sure vowel is a valid option
+		if (this._formantData.hasOwnProperty(v)){
+			freqs = this._formantData[v];
+		} else {
+			log(`fx(vowel): ${v} is not a valid vowel selection, using default "o"`);
+		}
+
+		// apply the frequencies, Q's and gain to the individual formant filters
+		for (let f=0; f<this._formants.length; f++){
+			// the frequency is the formant freq * shift factor
+			if (r > 0) {
+				this._formants[f].frequency.rampTo(freqs[f] * s, r, time);
+			} else {
+				this._formants[f].frequency.setValueAtTime(freqs[f] * s, time);
+			}
+			// Q = (Freq * Shift) / (BandWidthHz / 2)
+			// Default bandwidth set to 50Hz 
+			this._formants[f].Q.setValueAtTime(freqs[f] * s * 0.05, time);
+			// Apply gain compensation based on formant number, +18dB, +5, +2
+			this._formants[f].output.gain.setValueAtTime(18 * (0.31 ** f), time);
+		}
+		
+		// apply wetdry mix
+		this._mixWet.gain.setValueAtTime(w, time);
+		this._mixDry.gain.setValueAtTime(1 - w, time);
+	}
+
+	this.chain = function(){
+		return { 'send' : this._fx, 'return' : this._mix }
+	}
+
+	this.delete = function(){
+		const nodes = [ this._fx, this._mix, this._mixWet, this._mixDry, ...this._formants, this._lopass ];
+
+		nodes.forEach((n) => {
+			n.disconnect();
+			n.dispose();
+		});
+	}
+}
 
 // A Downsampling Chiptune effect. Downsamples the signal by a specified amount
 // Resulting in a lower samplerate, making it sound more like 8bit/chiptune
@@ -139,7 +253,7 @@ const DownSampler = function(_params){
 	}
 
 	this.delete = function(){
-		const nodes = [ this._fx, this._mix, this._mixDry ];
+		const nodes = [ this._fx.input, this._fx.output, this._fx, this._mix, this._mixDry ];
 
 		nodes.forEach((n) => {
 			n.disconnect();
@@ -153,12 +267,10 @@ const DownSampler = function(_params){
 // distortion is applied on the overdrive parameter
 //
 const TanhDistortion = function(_params){
-	_params = Util.mapDefaults(_params, [ 4, 1 ]);
+	_params = Util.mapDefaults(_params, [ 2, 1 ]);
 	// apply the default values and convert to arrays where necessary
 	this._drive = Util.toArray(_params[0]);
 	this._wet = Util.toArray(_params[1]);
-
-	console.log('Distortion with:', this._drive, this._wet);
 
 	// The crossfader for wet-dry (originally implemented with CrossFade)
 	// this._mix = new Tone.CrossFade();
@@ -204,7 +316,7 @@ const TanhDistortion = function(_params){
 	}
 
 	this.delete = function(){
-		let nodes = [ this._fx, this._mix, this._mixDry, this._mixWet ];
+		let nodes = [ this._fx.input, this._fx.output, this._fx, this._mix, this._mixDry, this._mixWet ];
 
 		nodes.forEach((n) => {
 			n.disconnect();
@@ -332,7 +444,7 @@ const Squash = function(_params){
 	}
 
 	this.delete = function(){
-		let nodes = [ this._fx, this._mix, this._mixDry ];
+		let nodes = [ this._fx.input, this._fx.output, this._fx, this._mix, this._mixDry ];
 
 		nodes.forEach((n) => {
 			n.disconnect();
@@ -370,6 +482,65 @@ const Reverb = function(_params){
 	this.delete = function(){
 		this._fx.disconnect();
 		this._fx.dispose();
+	}
+}
+
+// Dattorro Reverb FX
+// Good sound plate reverb emulation
+// Based on the paper by Jon Dattorro and the code from Khoin
+// https://ccrma.stanford.edu/~dattorro/EffectDesignPart1.pdf 
+// https://github.com/khoin/DattorroReverbNode 
+//
+const DattorroReverb = function(_params){
+	_params = Util.mapDefaults(_params, [ 0.5, 10, 0, 0.5 ]);
+	this._gain = Util.toArray(_params[0]);
+	this._size = Util.toArray(_params[1]);
+	// unused currently, but here for compatibility with Mercury4Max code
+	// this._slide = Util.toArray(_params[2]); 
+	this._wet = Util.toArray(_params[3]);
+
+	// The crossfader for wet-dry (originally implemented with CrossFade)
+	this._mix = new Tone.Add();
+	this._mixWet = new Tone.Gain(0).connect(this._mix);
+	this._mixDry = new Tone.Gain(1).connect(this._mix.addend);
+
+	// a custom tone audio node with input/output gain and worklet effect
+	this._fx = new Tone.ToneAudioNode();
+	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
+	this._fx.output = new Tone.Gain(1).connect(this._mixWet);
+	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('dattorro-reverb');
+	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+
+	this.set = (c, time) => {
+		const gn = Math.max(Util.getParam(this._gain, c), 0);
+		const meta = Util.clip(Util.getParam(this._size, c), 0, 20);
+		const wet = Util.clip(Util.getParam(this._wet, c));
+
+		const dc = Util.remap(meta, 0, 20, 0.01, 0.99, 0.8);
+		const df = Util.remap(meta, 0, 20, 0.2, 0.75, 0.5);
+		const dp = Util.remap(meta, 0, 20, 0.2, 0.65, 2.5);
+		const pd = Util.remap(meta, 0, 20, 700, 100);
+
+		this._fx.workletNode.parameters.get('decay').setValueAtTime(dc, time);
+		this._fx.workletNode.parameters.get('decayDiffusion1').setValueAtTime(df, time);
+		this._fx.workletNode.parameters.get('damping').setValueAtTime(dp, time);
+		this._fx.workletNode.parameters.get('preDelay').setValueAtTime(pd, time);
+
+		this._fx.workletNode.parameters.get('wet').setValueAtTime(gn * 0.7, time);
+		// this._fx.workletNode.parameters.get('dry').setValueAtTime(0.7, time);
+
+		// apply wetdry mix
+		this._mixWet.gain.setValueAtTime(wet, time);
+		this._mixDry.gain.setValueAtTime(1 - wet, time);
+	}
+
+	this.chain = () => {
+		return { 'send' : this._fx, 'return' : this._mix }
+	}
+
+	this.delete = () => {
+		const nodes = [ this._fx, this._mix, this._mixDry, this._fx.input, this._fx.output ];
+		nodes.forEach(n => { n.disconnect(); n.dispose() });
 	}
 }
 
