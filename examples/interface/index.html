@@ -45,20 +45,28 @@
 		let note;
 		let squash;
 		let detune;
+		let verb;
 
 		// initialize the sliders with specific ranges
 		// use noCanvas() because we're not planning on drawing anything
 		function setup() {
 			noCanvas();
+			createP('filter');
 			cutoff = createSlider(50, 5000, 200, 0);
+			createP('note');
 			note = createSlider(-12, 12, -10, 1);
+			createP('degrade');
 			degrade = createSlider(0, 1, 0.4, 0);
+			createP('detuning');
 			detune = createSlider(0, 1, 0.3, 0);
+			createP('reverb');
+			verb = createSlider(1, 20, 10, 0);
 			
 			cutoff.style('width', '50%');
 			note.style('width', '50%');
 			degrade.style('width', '50%');
 			detune.style('width', '50%');
+			verb.style('width', '50%');
 		}
 
 		// The Mercury code asks for the `{x.value()}` from the sliders 
@@ -69,9 +77,10 @@
 			set tempo 130
 			new synth saw name(s1)
 				set s1 note('{note.value()}' 0) slide(1/16) 
-				set s1 fx(filter low '{cutoff.value()}' 0.4 1/16) 
-				set s1 super(3 '{detune.value()}')  shape(off) 
+				set s1 fx(filter low '{cutoff.value()}' 0.4) 
+				set s1 super(3 '{detune.value()}')  shape(1 1/4) 
 				set s1 time(1/16) fx(degrade '{degrade.value()}')
+				set s1 fx(reverb 0.5 '{verb.value()}')
 		`
 
 		// evaluate the code on the click of a button

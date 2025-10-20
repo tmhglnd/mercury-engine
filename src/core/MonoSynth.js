@@ -107,16 +107,11 @@ class MonoSynth extends Instrument {
 	delete(){
 		// delete super class
 		super.delete();
+		
 		// dispose the sound source
-		// this.source.delete();
-		// this.adsr.dispose();
-		this.synth.stop();
-		this.synth.disconnect();
-		this.synth.dispose();
-
-		this.adsr.dispose();
-		this.synth.dispose();
-		this.source.dispose();
+		this.synth?.stop();
+		this.synth?.disconnect();
+		this.synth?.dispose();
 		
 		console.log('disposed MonoSynth()', this._wave);
 	}

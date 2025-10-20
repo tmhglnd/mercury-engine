@@ -57,15 +57,15 @@ class Sequencer {
 					this._beatCount = 0;
 				}
 			}
-			// set subdivision speeds
-			this._loop.playbackRate = Util.getParam(this._subdiv, this._count);
+			if (this._time !== null){
+				// set subdivision speeds
+				this._loop.playbackRate = Util.getParam(this._subdiv, this._count);
+				// get the subdivision count (always 0, except when subdividing)
+				this._subdivCnt = (this._subdivCnt + 1) % this._loop.playbackRate;
+				// humanize method is interesting to add
+				this._loop.humanize = Util.getParam(this._human, this._count);
+			}
 
-			// get the subdivision count (always 0, except when subdividing)
-			this._subdivCnt = (this._subdivCnt + 1) % this._loop.playbackRate;
-	
-			// humanize method is interesting to add
-			this._loop.humanize = Util.getParam(this._human, this._count);
-	
 			// get beat probability for current count
 			let b = Util.getParam(this._beat, this._count);
 	
@@ -91,8 +91,10 @@ class Sequencer {
 					}, (time - Tone.context.currentTime) * 1000);
 				}
 				// also emit an internal event for other instruments to sync to
-				// let event = new CustomEvent(`/${this._name}`, { detail: 1 });
-				// window.dispatchEvent(event);
+				const event = new CustomEvent(`/${this._name}`, { 
+					detail: { value: 1, time: time }
+				});
+				window.dispatchEvent(event);
 	
 				// execute a visual event for Hydra
 				if (this._visual.length > 0){
@@ -128,16 +130,17 @@ class Sequencer {
 				this._event(time) 
 			}, this._time).start(schedule);
 		} 
-		// else {
-		// 	// generate a listener for the osc-address
-		// 	let oscAddress = `${this._offset}`;
-		// 	window.addEventListener(oscAddress, (event) => {
-		// 		// trigger the event if value greater than 0
-		// 		if (event.detail > 0){ 
-		// 			Tone.Transport.scheduleOnce((time) => this._event(time), Tone.immediate());
-		// 		}
-		// 	});
-		// }
+		else {
+			// generate a listener for the osc-address and store for removal
+			this._oscAddress = `${this._offset}`;
+			this._listener = (event) => {
+				// trigger the event if value greater than 0
+				if (event.detail.value > 0){
+					this._event(event.detail.time);
+				}
+			}
+			window.addEventListener(this._oscAddress, this._listener);
+		}
 	}
 
 	event(c, time){
@@ -161,18 +164,18 @@ class Sequencer {
 
 	delete(){
 		// dispose loop
-		this._loop.dispose();
+		this._loop?.dispose();
 		console.log('=> disposed Sequencer()');
 	}
 
 	start(){
 		// restart at offset
-		this._loop.start(this._offset);
+		this._loop?.start(this._offset);
 	}
 
 	stop(){
 		// stop sequencer
-		this._loop.stop();
+		this._loop?.stop();
 	}
 
 	time(t, o=0){

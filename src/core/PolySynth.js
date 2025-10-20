@@ -62,9 +62,9 @@ class PolySynth extends PolyInstrument {
 			this.sources[id].frequency.rampTo(f, s, time);
 		} else {
 			this.sources[id].frequency.setValueAtTime(f, time);
-			// first time the synth plays it doesn't slide!
-			this._firstSlide[id] = false;
 		}
+		// first time the synth plays it doesn't slide!
+		this._firstSlide[id] = false;
 	}
 
 	note(i=0, o=0){

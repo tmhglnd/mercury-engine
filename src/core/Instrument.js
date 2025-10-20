@@ -30,7 +30,7 @@ class Instrument extends Sequencer {
 
 	channelStrip(){
 		// gain => output
-		this.gain = new Tone.Gain(0).toDestination();
+		this.gain = new Tone.Gain(0, "normalRange").toDestination();
 		// panning => gain
 		this.panner = new Tone.Panner(0).connect(this.gain);
 		// adsr => panning
@@ -41,15 +41,16 @@ class Instrument extends Sequencer {
 
 	envelope(d){
 		// return an Envelope and connect to next node
-		return new Tone.AmplitudeEnvelope({
-			attack: 0,
-			attackCurve: "linear",
-			decay: 0,
-			decayCurve: "linear",
-			sustain: 1,
-			release: 0.001,
-			releaseCurve: "linear"
-		}).connect(d);
+		// return new Tone.AmplitudeEnvelope({
+		// 	attack: 0,
+		// 	attackCurve: "linear",
+		// 	decay: 0,
+		// 	decayCurve: "linear",
+		// 	sustain: 1,
+		// 	release: 0.001,
+		// 	releaseCurve: "linear"
+		// }).connect(d);
+		return new Tone.Gain(0).connect(d);
 	}
 
 	event(c, time){
@@ -59,7 +60,7 @@ class Instrument extends Sequencer {
 
 		// set FX parameters
 		if (this._fx){
-			for (let f=0; f<this._fx.length; f++){
+			for (let f = 0; f < this._fx.length; f++){
 				this._fx[f].set(c, time, this.bpm());
 			}
 		}
@@ -88,28 +89,25 @@ class Instrument extends Sequencer {
 
 		// set shape for playback (fade-in / out and length)
 		if (this._att){
-			let att = Util.divToS(Util.getParam(this._att, c), this.bpm());
-			let dec = Util.divToS(Util.getParam(this._sus, c), this.bpm());
-			let rel = Util.divToS(Util.getParam(this._rel, c), this.bpm());
-
-			// minimum attaack and release times are 1 millisecond
-			this.adsr.attack = Math.max(0.001, att);
-			this.adsr.decay = dec;
-			this.adsr.release = Math.max(0.001, rel);
+			const att = Math.max(Util.divToS(Util.getParam(this._att, c), this.bpm()), 0.001);
+			const dec = Util.divToS(Util.getParam(this._sus, c), this.bpm());
+			const rel = Math.max(Util.divToS(Util.getParam(this._rel, c), this.bpm()), 0.001);
 			
-			// trigger the envelope and release after a short while
-			// a better working alternative for the code below
-			this.adsr.triggerAttack(time);
-			this.adsr.triggerRelease(time + att + dec);
-
-			// e = Math.min(this._time, att + dec + rel);
-			// e = Math.min(t, att + dec + rel);
-
-			// let rt = Math.max(0.001, e - this.adsr.release);
-			// this.adsr.triggerAttackRelease(rt, time);
+			// short ramp for retrigger, fades out the envelope over 2 ms
+			// use the retrigger time to schedule the event a bit later as well
+			let retrigger = 0;
+			if (this.adsr.gain.getValueAtTime(time) > 0.01){
+				retrigger = 0.002;
+				// short ramp for retrigger, fades out the previous ramp
+				this.adsr.gain.linearRampTo(0.0, retrigger, time);
+			}
+			// trigger the envelope and release after specified time
+			this.adsr.gain.linearRampTo(1.0, att, time + retrigger);
+			// exponential rampto * 5 for a good sounding exponential ramp
+			this.adsr.gain.exponentialRampTo(0.0, rel * 5, time + att + dec + retrigger);
 		} else {
-			// if shape is 'off' only trigger attack
-			this.adsr.triggerAttack(time);
+			// if shape is 'off' turn on the gain of the envelope
+			this.adsr.gain.setValueAtTime(1.0, time);
 		}
 	}
 
@@ -119,14 +117,17 @@ class Instrument extends Sequencer {
 		console.log('Instrument()', this._name, c);
 	}
 
-	fadeIn(t){
+	fadeIn(t=0){
 		// fade in the sound upon evaluation of code
-		this.gain.gain.rampTo(1, t, Tone.now());
+		// this.gain.gain.rampTo(1, t, Tone.now());
+		// fade in the sound directly in 5 ms
+		this.gain.gain.rampTo(1, 0.005, Tone.now());
 	}
 
 	fadeOut(t){
 		// fade out the sound upon evaluation of new code
 		this.gain.gain.rampTo(0, t, Tone.now());
+		
 		setTimeout(() => {
 			this.delete();
 			// wait a little bit extra before deleting to avoid clicks
@@ -142,6 +143,14 @@ class Instrument extends Sequencer {
 
 		this.panner.disconnect();
 		this.panner.dispose();
+
+		this.adsr?.disconnect();
+		this.adsr?.dispose();
+
+		// dispose the sound source (depending on inheriting class)
+		this.source?.stop();
+		this.source?.disconnect();
+		this.source?.dispose();
 		// this.adsr.dispose();
 		// remove all fx
 		this._fx.map((f) => f.delete());

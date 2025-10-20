@@ -74,7 +74,7 @@ class MonoMidi extends Sequencer {
 		// only play a note if the notes are provided in the function
 		// if (this._note.length > 0){
 
-		let noteOptions = { duration: d, velocity: g, time: sync };
+		let noteOptions = { duration: d, attack: g, time: sync };
 
 		// if a midinote is selected instead of note
 		// play the value without mapping
