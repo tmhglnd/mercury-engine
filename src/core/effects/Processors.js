@@ -195,6 +195,96 @@ class TanhDistortionProcessor extends AudioWorkletProcessor {
 }
 registerProcessor('tanh-distortion-processor', TanhDistortionProcessor);
 
+// A distortion algorithm using the arctan function as a 
+// waveshaping technique. Some mapping to apply a more equal loudness 
+// distortion is applied on the overdrive parameter
+//
+class ArctanDistortionProcessor extends AudioWorkletProcessor {
+	static get parameterDescriptors(){
+		return [{
+			name: 'amount',
+			defaultValue: 5,
+			minValue: 1
+		}]
+	}
+
+	constructor(){
+		super();
+
+		// quarter pi constant and inverse
+		this.Q_PI = 0.7853981633974483; // 0.25 * Math.PI;
+		this.INVQ_PI = 1.2732395447351628; //1.0 / this.Q_PI;
+	}
+
+	process(inputs, outputs, parameters){
+		const input = inputs[0];
+		const output = outputs[0];
+
+		const gain = parameters.amount[0];
+		const makeup = Math.min(1, Math.max(0, 1 - ((Math.atan(gain) - this.Q_PI) * this.INVQ_PI * 0.823)));
+
+		if (input.length > 0){
+			for (let channel=0; channel<input.length; channel++){
+				for (let i=0; i<input[channel].length; i++){
+					output[channel][i] = Math.atan(input[channel][i] * gain) * makeup;
+				}
+			}
+		}
+		return true;
+	}
+}
+registerProcessor('arctan-distortion-processor', ArctanDistortionProcessor);
+
+
+// A fuzz distortion effect in modelled after the Big Muff Pi pedal 
+// by Electro Harmonics. Using three stages of distortion: 
+// 1 soft-clipping stage, 2 half-wave rectifier, 3 hard-clipping stage
+// Based on: https://github.com/hazza-music/EHX-Big-Muff-Pi-Emulation/blob/main/Technical%20Essay.pdf
+// 
+class FuzzProcessor extends AudioWorkletProcessor {
+	static get parameterDescriptors() {
+		return [{
+			name: 'amount',
+			defaultValue: 5,
+			minValue: 1
+		}]
+	}
+
+	constructor(){ 
+		super(); 
+		// history for onepole filter for dcblocking
+		this.history = [0, 0];
+	}
+
+	process(inputs, outputs, parameters){
+		const input = inputs[0];
+		const output = outputs[0];
+
+		const gain = parameters.amount[0];
+		const makeup = Math.max((1 - Math.pow((gain-1) / 63, 0.13)) * 0.395 + 0.605, 0.605);
+
+		if (input.length > 0){
+			for (let channel = 0; channel < input.length; channel++){
+				for (let i = 0; i < input[channel].length; i++){
+					// soft-clipping
+					const sc = Math.atan(input[channel][i] * gain * 2) * 0.6;
+					// half-wave rectification and add for 
+					// asymmetric distortion
+					const hw = ((sc > 0) ? sc : 0) + input[channel][i];
+					// hard-clipping
+					const hc = Math.max(-0.707, Math.min(0.707, hw));
+					// onepole lowpass filter for dc-block
+					this.history[channel] = (hc - this.history[channel]) * 0.0015 + this.history[channel];
+					// dc-block and gain compensation and output
+					output[channel][i] = (hc - this.history[channel]) * makeup;
+				}
+			}
+		}
+		return true;
+	}
+}
+registerProcessor('fuzz-processor', FuzzProcessor);
+
 // A distortion/compression effect of an incoming signal
 // Based on an algorithm by Peter McCulloch
 // 
