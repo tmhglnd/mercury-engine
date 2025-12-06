@@ -45,6 +45,7 @@
 		let note;
 		let squash;
 		let detune;
+		let distort;
 		let verb;
 
 		// initialize the sliders with specific ranges
@@ -59,6 +60,8 @@
 			degrade = createSlider(0, 1, 0.4, 0);
 			createP('detuning');
 			detune = createSlider(0, 1, 0.3, 0);
+			createP('distortion');
+			distort = createSlider(1, 200, 5, 0);
 			createP('reverb');
 			verb = createSlider(1, 20, 10, 0);
 			
@@ -66,6 +69,7 @@
 			note.style('width', '50%');
 			degrade.style('width', '50%');
 			detune.style('width', '50%');
+			distort.style('width', '50%');
 			verb.style('width', '50%');
 		}
 
@@ -75,11 +79,12 @@
 		// evaluates small javascript snippets
 		const mercuryCode = `
 			set tempo 130
-			new synth saw name(s1)
+			new synth saw name(s1) time(1/16) shape(1 1/8)
 				set s1 note('{note.value()}' 0) slide(1/16) 
 				set s1 fx(filter low '{cutoff.value()}' 0.4) 
-				set s1 super(3 '{detune.value()}')  shape(1 1/4) 
-				set s1 time(1/16) fx(degrade '{degrade.value()}')
+				set s1 super(3 '{detune.value()}')
+				set s1 fx(degrade '{degrade.value()}')
+				set s1 fx(fuzz '{distort.value()}' 0.6) 
 				set s1 fx(reverb 0.5 '{verb.value()}')
 		`
 
