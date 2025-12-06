@@ -16572,7 +16572,7 @@ const Delay = function(_params){
 // 		this._fx.dispose();
 // 	}
 // }
-},{"./Util.js":66,"tone":44,"total-serialism":47}],57:[function(require,module,exports){
+},{"./Util.js":67,"tone":44,"total-serialism":47}],57:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
 const fxMap = require('./Effects.js');
@@ -16595,6 +16595,7 @@ class Instrument extends Sequencer {
 		this.adsr;
 		this.panner;
 		this.gain;
+		this.post;
 		this._fx;
 
 		// The source to be defined by inheriting class
@@ -16606,8 +16607,10 @@ class Instrument extends Sequencer {
 	channelStrip(){
 		// gain => output
 		this.gain = new Tone.Gain(0, "normalRange").toDestination();
+		// postfx-gain => gain (for gain() function in instrument)
+		this.post = new Tone.Gain(1, "gain").connect(this.gain);
 		// panning => gain
-		this.panner = new Tone.Panner(0).connect(this.gain);
+		this.panner = new Tone.Panner(0).connect(this.post);
 		// adsr => panning
 		this.adsr = this.envelope(this.panner);
 		// return Node to connect source => adsr
@@ -16646,9 +16649,12 @@ class Instrument extends Sequencer {
 		this.panner.pan.setValueAtTime(p, time);
 
 		// ramp volume
-		let g = Util.atodb(Util.getParam(this._gain[0], c) * 0.707);
+		// let g = Util.atodb(Util.getParam(this._gain[0], c) * 0.707);
+		let g = Util.getParam(this._gain[0], c) * 0.707;
 		let r = Util.msToS(Math.max(0, Util.getParam(this._gain[1], c)));
-		this.source.volume.rampTo(g, r, time);
+		// this.source.volume.rampTo(g, r, time);
+		this.source.volume.setValueAtTime(1, time);
+		this.post.gain.rampTo(g, r, time);
 
 		this.sourceEvent(c, e, time);
 
@@ -16729,6 +16735,9 @@ class Instrument extends Sequencer {
 		this.gain.disconnect();
 		this.gain.dispose();
 
+		this.post.disconnect();
+		this.post.dispose();
+
 		this.panner.disconnect();
 		this.panner.dispose();
 
@@ -16739,7 +16748,7 @@ class Instrument extends Sequencer {
 		this.source?.stop();
 		this.source?.disconnect();
 		this.source?.dispose();
-		// this.adsr.dispose();
+
 		// remove all fx
 		this._fx.map((f) => f.delete());
 		console.log('=> disposed Instrument() with FX:', this._fx);
@@ -16789,7 +16798,7 @@ class Instrument extends Sequencer {
 	add_fx(...fx){
 		// the effects chain for the sound
 		this._fx = [];
-		// console.log('Effects currently disabled');
+
 		fx.forEach((f) => {
 			if (fxMap[f[0]]){
 				let tmpF = fxMap[f[0]](f.slice(1));
@@ -16811,19 +16820,20 @@ class Instrument extends Sequencer {
 			// allowing to chain multiple effects within one process
 			let pfx = this._ch[0];
 			this.panner.connect(pfx.send);
-			for (let f=1; f<this._ch.length; f++){
+			for (let f = 1; f < this._ch.length; f++){
 				if (pfx){
 					pfx.return.connect(this._ch[f].send);
 				}
 				pfx = this._ch[f];
 			}
 			// pfx.return.connect(Tone.Destination);
-			pfx.return.connect(this.gain);
+			// pfx.return.connect(this.gain);
+			pfx.return.connect(this.post);
 		}
 	}
 }
 module.exports = Instrument;
-},{"./Effects.js":56,"./Sequencer.js":65,"./Util.js":66,"tone":44}],58:[function(require,module,exports){
+},{"./Effects.js":56,"./Sequencer.js":66,"./Util.js":67,"tone":44}],58:[function(require,module,exports){
 const Tone = require('tone');
 const Instrument = require('./Instrument.js');
 const Util = require('./Util.js');
@@ -16875,7 +16885,7 @@ class MonoInput extends Instrument {
 	}
 }
 module.exports = MonoInput;
-},{"./Instrument.js":57,"./Util.js":66,"tone":44}],59:[function(require,module,exports){
+},{"./Instrument.js":57,"./Util.js":67,"tone":44}],59:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
 const Sequencer = require('./Sequencer.js');
@@ -17056,7 +17066,101 @@ class MonoMidi extends Sequencer {
 	}
 }
 module.exports = MonoMidi;
-},{"./Sequencer.js":65,"./Util.js":66,"tone":44,"webmidi":55}],60:[function(require,module,exports){
+},{"./Sequencer.js":66,"./Util.js":67,"tone":44,"webmidi":55}],60:[function(require,module,exports){
+const Tone = require('tone');
+const Instrument = require('./Instrument.js');
+const { toArray, getParam, clip, log } = require('./Util.js');
+
+class MonoNoise extends Instrument {
+	constructor(engine, t='white', canvas){
+		// Inherit from Instrument
+		super(engine, canvas);
+
+		// synth specific variables;
+		this._type = toArray(t);
+		this._typeMap = {
+			'white' : 0,
+			'pink' : 1,
+			'brownian' : 2,
+			'brown' : 2,
+			'browny' : 2,
+			'red' : 2,
+			'lofi' : 3,
+			'dust' : 4,
+			'crackle' : 5
+		}
+		this._density = [ 0.25 ];
+		this.started = false;
+		this.createSource();
+
+		console.log('=> MonoNoise()', this);
+	}
+
+	createSource(){
+		// create a noise source from an audioWorkletNode, containing many 
+		// types of noises
+		this.source = new Tone.ToneAudioNode();
+		this.source.workletNode = Tone.getContext().createAudioWorkletNode('noise-processor');
+		this.source.input = new Tone.Gain();
+		this.source.output = new Tone.Gain(0, 'decibels');
+		this.source.volume = this.source.output.gain;
+		this.source.input.chain(this.source.workletNode, this.source.output);
+
+		this.source.connect(this.channelStrip());
+
+		// empty method to get rid of stop error
+		this.source.stop = () => {};
+
+		// a pink noise source based on a buffer noise 
+		// to reduce complex calculation
+		this.pink = new Tone.Noise('pink').connect(this.source);
+	}
+
+	sourceEvent(c, e, time){
+		// set noise type for the generator
+		let t = getParam(this._type, c);
+		if (Object.hasOwn(this._typeMap, t)){
+			t = this._typeMap[t];
+		} else {
+			log(`${t} is not a valid noise type`);
+			// default wave if wave does not exist
+			t = 0;
+		}
+		let type = this.source.workletNode.parameters.get('type');
+		type.setValueAtTime(t, time);
+
+		// set the density amount (only valid for brownian, lofi, dust, crackle)
+		let d = clip(getParam(this._density, c), 0.01, 1);
+		let density = this.source.workletNode.parameters.get('density');
+		density.setValueAtTime(d, time);
+
+		// start the pink noise source also
+		if (!this.started){
+			this.pink.start(time);
+			this.started = true;
+		}
+	}
+
+	density(d){
+		this._density = toArray(d);
+	}
+
+	delete(){
+		// delete super class
+		super.delete();
+
+		this.source.input.disconnect();
+		this.source.input.dispose();
+		this.source.output.disconnect();
+		this.source.output.dispose();
+		this.pink.disconnect();
+		this.pink.dispose();
+		
+		console.log('disposed MonoNoise()');
+	}
+}
+module.exports = MonoNoise;
+},{"./Instrument.js":57,"./Util.js":67,"tone":44}],61:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
 // const fxMap = require('./Effects.js');
@@ -17220,7 +17324,7 @@ class MonoSample extends Instrument {
 	}
 }
 module.exports = MonoSample;
-},{"./Instrument.js":57,"./Util.js":66,"tone":44}],61:[function(require,module,exports){
+},{"./Instrument.js":57,"./Util.js":67,"tone":44}],62:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
 // const fxMap = require('./Effects.js');
@@ -17340,7 +17444,7 @@ class MonoSynth extends Instrument {
 	}
 }
 module.exports = MonoSynth;
-},{"./Instrument":57,"./Util.js":66,"tone":44,"total-serialism":47}],62:[function(require,module,exports){
+},{"./Instrument":57,"./Util.js":67,"tone":44,"total-serialism":47}],63:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
 const Instrument = require('./Instrument.js');
@@ -17373,9 +17477,12 @@ class PolyInstrument extends Instrument {
 	channelStrip(){
 		// gain => output
 		this.gain = new Tone.Gain(0).toDestination();
+		// postfx-gain => gain (for gain() function in instrument)
+		this.post = new Tone.Gain(1, "gain").connect(this.gain);
 		// panning => gain
-		this.panner = new Tone.Panner(0).connect(this.gain);
+		this.panner = new Tone.Panner(0).connect(this.post);
 		// adsr => panning
+		// done through createVoices
 	}
 
 	createVoices(){
@@ -17524,7 +17631,7 @@ class PolyInstrument extends Instrument {
 	}
 }
 module.exports = PolyInstrument;
-},{"./Instrument.js":57,"./Util.js":66,"tone":44}],63:[function(require,module,exports){
+},{"./Instrument.js":57,"./Util.js":67,"tone":44}],64:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
 const PolyInstrument = require('./PolyInstrument.js');
@@ -17698,7 +17805,7 @@ class PolySample extends PolyInstrument {
 	}
 }
 module.exports = PolySample;
-},{"./PolyInstrument.js":62,"./Util.js":66,"tone":44}],64:[function(require,module,exports){
+},{"./PolyInstrument.js":63,"./Util.js":67,"tone":44}],65:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
 const PolyInstrument = require('./PolyInstrument');
@@ -17804,7 +17911,7 @@ class PolySynth extends PolyInstrument {
 	}
 }
 module.exports = PolySynth;
-},{"./PolyInstrument":62,"./Util.js":66,"tone":44}],65:[function(require,module,exports){
+},{"./PolyInstrument":63,"./Util.js":67,"tone":44}],66:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
 // const WebMidi = require("webmidi");
@@ -18078,7 +18185,7 @@ class Sequencer {
 	}
 }
 module.exports = Sequencer;
-},{"./Util.js":66,"tone":44}],66:[function(require,module,exports){
+},{"./Util.js":67,"tone":44}],67:[function(require,module,exports){
 const Tone = require('tone');
 const { noteToMidi, toScale, mtof } = require('total-serialism').Translate;
 
@@ -18310,7 +18417,7 @@ function log(msg){
 }
 
 module.exports = { mapDefaults, atTime, atodb, dbtoa, clip, remap,assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }
-},{"tone":44,"total-serialism":47}],67:[function(require,module,exports){
+},{"tone":44,"total-serialism":47}],68:[function(require,module,exports){
 module.exports={
 	"uptempo" : 10,
 	"downtempo" : 10,
@@ -18331,9 +18438,9 @@ module.exports={
 	"dnb" : 170,
 	"neurofunk" : 180
 }
-},{}],68:[function(require,module,exports){
+},{}],69:[function(require,module,exports){
 
-const Tone = require('tone');
+// const Tone = require('tone');
 const Mercury = require('mercury-lang');
 const TL = require('total-serialism').Translate;
 const { normalize, multiply } = require('total-serialism').Utility;
@@ -18341,13 +18448,13 @@ const { normalize, multiply } = require('total-serialism').Utility;
 const MonoSample = require('./core/MonoSample.js');
 const MonoMidi = require('./core/MonoMidi.js');
 const MonoSynth = require('./core/MonoSynth.js');
+const MonoNoise = require('./core/MonoNoise.js');
 const MonoInput = require('./core/MonoInput.js');
 const PolySynth = require('./core/PolySynth.js');
 const PolySample = require('./core/PolySample.js');
 const Tempos = require('./data/genre-tempos.json');
 const Util = require('./core/Util.js');
 const { divToS } = require('./core/Util.js');
-const { count } = require('total-serialism/src/gen-basic.js');
 
 class MercuryInterpreter {
 	constructor({ hydra, p5canvas } = {}){
@@ -18577,6 +18684,11 @@ class MercuryInterpreter {
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
+			'noise' : (obj) => {
+				let inst = new MonoNoise(this, obj.type, this.canvas);
+				objectMap.applyFunctions(obj.functions, inst, obj.type);
+				return inst;
+			},
 			'polySynth' : (obj) => {
 				let inst = new PolySynth(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
@@ -18690,7 +18802,7 @@ class MercuryInterpreter {
 	}
 }
 module.exports = { MercuryInterpreter }
-},{"./core/MonoInput.js":58,"./core/MonoMidi.js":59,"./core/MonoSample.js":60,"./core/MonoSynth.js":61,"./core/PolySample.js":63,"./core/PolySynth.js":64,"./core/Util.js":66,"./data/genre-tempos.json":67,"mercury-lang":27,"tone":44,"total-serialism":47,"total-serialism/src/gen-basic.js":48}],69:[function(require,module,exports){
+},{"./core/MonoInput.js":58,"./core/MonoMidi.js":59,"./core/MonoNoise.js":60,"./core/MonoSample.js":61,"./core/MonoSynth.js":62,"./core/PolySample.js":64,"./core/PolySynth.js":65,"./core/Util.js":67,"./data/genre-tempos.json":68,"mercury-lang":27,"total-serialism":47}],70:[function(require,module,exports){
 
 console.log(`
 Mercury Engine by Timo Hoogland (c) 2018-2025
@@ -18709,7 +18821,7 @@ const { WebMidi } = require("webmidi");
 // load extra AudioWorkletProcessors from file
 // transformed to inline with browserify brfs
 
-const fxExtensions = "\n// A white noise generator at -6dBFS to test AudioWorkletProcessor\n//\n// class NoiseProcessor extends AudioWorkletProcessor {\n// \tprocess(inputs, outputs, parameters){\n// \t\tconst output = outputs[0];\n\n// \t\toutput.forEach((channel) => {\n// \t\t\tfor (let i=0; i<channel.length; i++) {\n// \t\t\t\tchannel[i] = Math.random() - 0.5;\n// \t\t\t}\n// \t\t});\n// \t\treturn true;\n// \t}\n// }\n// registerProcessor('noise-processor', NoiseProcessor);\n\n// A Downsampling Chiptune effect. Downsamples the signal by a specified amount\n// Resulting in a lower samplerate, making it sound more like 8bit/chiptune\n// Programmed with a custom AudioWorkletProcessor, see effects/Processors.js\n//\nclass DownSampleProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [{\n\t\t\tname: 'down',\n\t\t\tdefaultValue: 8,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 2048\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t\t// the frame counter\n\t\tthis.count = 0;\n\t\t// sample and hold variable array\n\t\tthis.sah = [];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\t// if there is anything to process\n\t\tif (input.length > 0){\n\t\t\t// for the length of the sample array (generally 128)\n\t\t\tfor (let i=0; i<input[0].length; i++){\n\t\t\t\tconst d = (parameters.down.length > 1) ? parameters.down[i] : parameters.down[0];\n\t\t\t\t// for every channel\n\t\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\t\t// if counter equals 0, sample and hold\n\t\t\t\t\tif (this.count % d === 0){\n\t\t\t\t\t\tthis.sah[channel] = input[channel][i];\n\t\t\t\t\t}\n\t\t\t\t\t// output the currently held sample\n\t\t\t\t\toutput[channel][i] = this.sah[channel];\n\t\t\t\t}\n\t\t\t\t// increment sample counter\n\t\t\t\tthis.count++;\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('downsampler-processor', DownSampleProcessor);\n\n// A distortion algorithm using the tanh (hyperbolic-tangent) as a \n// waveshaping technique. Some mapping to apply a more equal loudness \n// distortion is applied on the overdrive parameter\n//\nclass TanhDistortionProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1\n\t\t}, {\n\t\t\tname: 'makeup',\n\t\t\tdefaultValue: 0.5,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 2\n\t\t}]\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\tconst m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];\n\t\t\t\t\t// simple waveshaping with tanh\n\t\t\t\t\toutput[channel][i] = Math.tanh(input[channel][i] * a) * m;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('tanh-distortion-processor', TanhDistortionProcessor);\n\n// A distortion/compression effect of an incoming signal\n// Based on an algorithm by Peter McCulloch\n// \nclass SquashProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 1024\n\t\t}, {\n\t\t\tname: 'makeup',\n\t\t\tdefaultValue: 0.5,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 2\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\t\t\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\t// (s * a) / ((s * a)^2 * 0.28 + 1) / √a\n\t\t\t\t\t// drive amount, minimum of 1\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\t// makeup gain\n\t\t\t\t\tconst m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];\n\t\t\t\t\t// set the waveshaper effect\n\t\t\t\t\tconst s = input[channel][i];\n\t\t\t\t\tconst x = s * a * 1.412;\n\t\t\t\t\toutput[channel][i] = (x / (x * x * 0.28 + 1.0)) * m * 0.708;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('squash-processor', SquashProcessor);\n\n// Dattorro Reverberator\n// Thanks to port by khoin, taken from:\n// https://github.com/khoin/DattorroReverbNode\n// based on the paper from Jon Dattorro:\n// https://ccrma.stanford.edu/~dattorro/EffectDesignPart1.pdf\n// with small modifications to work in Mercury\n//\n// In jurisdictions that recognize copyright laws, this software is to\n// be released into the public domain.\n\n// THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND.\n// THE AUTHOR(S) SHALL NOT BE LIABLE FOR ANYTHING, ARISING FROM, OR IN\n// CONNECTION WITH THE SOFTWARE OR THE DISTRIBUTION OF THE SOFTWARE.\n// \nclass DattorroReverb extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [\n\t\t\t[\"preDelay\", 0, 0, sampleRate - 1, \"k-rate\"],\n\t\t\t// [\"bandwidth\", 0.9999, 0, 1, \"k-rate\"],\t\n\t\t\t[\"inputDiffusion1\", 0.75, 0, 1, \"k-rate\"],\n\t\t\t[\"inputDiffusion2\", 0.625, 0, 1, \"k-rate\"],\n\t\t\t[\"decay\", 0.5, 0, 1, \"k-rate\"],\n\t\t\t[\"decayDiffusion1\", 0.7, 0, 0.999999, \"k-rate\"],\n\t\t\t[\"decayDiffusion2\", 0.5, 0, 0.999999, \"k-rate\"],\n\t\t\t[\"damping\", 0.005, 0, 1, \"k-rate\"],\n\t\t\t[\"excursionRate\", 0.5, 0, 2, \"k-rate\"],\n\t\t\t[\"excursionDepth\", 0.7, 0, 2, \"k-rate\"],\n\t\t\t[\"wet\", 0.7, 0, 2, \"k-rate\"],\n\t\t\t// [\"dry\", 0.7, 0, 2, \"k-rate\"]\n\t\t].map(x => new Object({\n\t\t\tname: x[0],\n\t\t\tdefaultValue: x[1],\n\t\t\tminValue: x[2],\n\t\t\tmaxValue: x[3],\n\t\t\tautomationRate: x[4]\n\t\t}));\n\t}\n\n\tconstructor(options) {\n\t\tsuper(options);\n\n\t\tthis._Delays = [];\n\t\t// Pre-delay is always one-second long, rounded to the nearest 128-chunk\n\t\tthis._pDLength = sampleRate + (128 - sampleRate % 128);\n\t\tthis._preDelay = new Float32Array(this._pDLength);\n\t\tthis._pDWrite = 0;\n\t\tthis._lp1 = 0.0;\n\t\tthis._lp2 = 0.0;\n\t\tthis._lp3 = 0.0;\n\t\tthis._excPhase = 0.0;\n\n\t\t[\n\t\t\t0.004771345, 0.003595309, 0.012734787, 0.009307483, // pre-tank\n\t\t\t0.022579886, 0.149625349, 0.060481839, 0.1249958, // left-loop\n\t\t\t0.030509727, 0.141695508, 0.089244313, 0.106280031 // right-loop\n\t\t].forEach(x => this.makeDelay(x));\n\n\t\tthis._taps = Int16Array.from([\n\t\t\t0.008937872, 0.099929438, 0.064278754, 0.067067639, \n\t\t\t0.066866033, 0.006283391, 0.035818689, // left-output\n\t\t\t0.011861161, 0.121870905, 0.041262054, 0.08981553, \n\t\t\t0.070931756, 0.011256342, 0.004065724 // right-output\n\t\t], x => Math.round(x * sampleRate));\n\t}\n\n\tmakeDelay(length) {\n\t\t// len, array, write, read, mask\n\t\tlet len = Math.round(length * sampleRate);\n\t\tlet nextPow2 = 2 ** Math.ceil(Math.log2((len)));\n\t\tthis._Delays.push([\n\t\t\tnew Float32Array(nextPow2), len - 1, 0 | 0, nextPow2 - 1\n\t\t]);\n\t}\n\n\twriteDelay(index, data) {\n\t\treturn this._Delays[index][0][this._Delays[index][1]] = data;\n\t}\n\n\treadDelay(index) {\n\t\treturn this._Delays[index][0][this._Delays[index][2]];\n\t}\n\n\treadDelayAt(index, i) {\n\t\tlet d = this._Delays[index];\n\t\treturn d[0][(d[2] + i) & d[3]];\n\t}\n\n\t// cubic interpolation\n\t// O. Niemitalo: \n\t// https://www.musicdsp.org/en/latest/Other/49-cubic-interpollation.html\n\treadDelayCAt(index, i) {\n\t\tlet d = this._Delays[index],\n\t\t\tfrac = i - ~~i,\n\t\t\tint = ~~i + d[2] - 1,\n\t\t\tmask = d[3];\n\n\t\tlet x0 = d[0][int++ & mask],\n\t\t\tx1 = d[0][int++ & mask],\n\t\t\tx2 = d[0][int++ & mask],\n\t\t\tx3 = d[0][int & mask];\n\n\t\tlet a = (3 * (x1 - x2) - x0 + x3) / 2,\n\t\t\tb = 2 * x2 + x0 - (5 * x1 + x3) / 2,\n\t\t\tc = (x2 - x0) / 2;\n\n\t\treturn (((a * frac) + b) * frac + c) * frac + x1;\n\t}\n\n\t// First input will be downmixed to mono if number of channels is not 2\n\t// Outputs Stereo.\n\tprocess(inputs, outputs, parameters) {\n\t\tconst pd = ~~parameters.preDelay[0],\n\t\t\t// bw = parameters.bandwidth[0], // replaced by using damping\n\t\t\tfi = parameters.inputDiffusion1[0],\n\t\t\tsi = parameters.inputDiffusion2[0],\n\t\t\tdc = parameters.decay[0],\n\t\t\tft = parameters.decayDiffusion1[0],\n\t\t\tst = parameters.decayDiffusion2[0],\n\t\t\tdp = 1 - parameters.damping[0],\n\t\t\tex = parameters.excursionRate[0] / sampleRate,\n\t\t\ted = parameters.excursionDepth[0] * sampleRate / 1000,\n\t\t\twe = parameters.wet[0]; //* 0.6, // lo & ro both mult. by 0.6 anyways\n\t\t\t// dr = parameters.dry[0];\n\n\t\t// write to predelay and dry output\n\t\tif (inputs[0].length == 2) {\n\t\t\tfor (let i = 127; i >= 0; i--) {\n\t\t\t\tthis._preDelay[this._pDWrite + i] = (inputs[0][0][i] + inputs[0][1][i]) * 0.5;\n\n\t\t\t\t// removed the dry parameter, this is handled in the Tone Node\n\t\t\t\t// outputs[0][0][i] = inputs[0][0][i] * dr;\n\t\t\t\t// outputs[0][1][i] = inputs[0][1][i] * dr;\n\t\t\t}\n\t\t} else if (inputs[0].length > 0) {\n\t\t\tthis._preDelay.set(\n\t\t\t\tinputs[0][0],\n\t\t\t\tthis._pDWrite\n\t\t\t);\n\t\t\t// for (let i = 127; i >= 0; i--)\n\t\t\t// \toutputs[0][0][i] = outputs[0][1][i] = inputs[0][0][i] * dr;\n\t\t} else {\n\t\t\tthis._preDelay.set(\n\t\t\t\tnew Float32Array(128),\n\t\t\t\tthis._pDWrite\n\t\t\t);\n\t\t}\n\n\t\tlet i = 0 | 0;\n\t\twhile (i < 128) {\n\t\t\tlet lo = 0.0,\n\t\t\t\tro = 0.0;\n\n\t\t\t// input damping (formerly known as bandwidth bw, now uses dp)\n\t\t\tthis._lp1 += dp * (this._preDelay[(this._pDLength + this._pDWrite - pd + i) % this._pDLength] - this._lp1);\n\n\t\t\t// pre-tank\n\t\t\tlet pre = this.writeDelay(0, this._lp1 - fi * this.readDelay(0));\n\t\t\tpre = this.writeDelay(1, fi * (pre - this.readDelay(1)) + this.readDelay(0));\n\t\t\tpre = this.writeDelay(2, fi * pre + this.readDelay(1) - si * this.readDelay(2));\n\t\t\tpre = this.writeDelay(3, si * (pre - this.readDelay(3)) + this.readDelay(2));\n\n\t\t\tlet split = si * pre + this.readDelay(3);\n\n\t\t\t// excursions\n\t\t\t// could be optimized?\n\t\t\tlet exc = ed * (1 + Math.cos(this._excPhase * 6.2800));\n\t\t\tlet exc2 = ed * (1 + Math.sin(this._excPhase * 6.2847));\n\n\t\t\t// left loop\n\t\t\t// tank diffuse 1\n\t\t\tlet temp = this.writeDelay(4, split + dc * this.readDelay(11) + ft * this.readDelayCAt(4, exc));\n\t\t\t// long delay 1\n\t\t\tthis.writeDelay(5, this.readDelayCAt(4, exc) - ft * temp);\n\t\t\t// damp 1\n\t\t\tthis._lp2 += dp * (this.readDelay(5) - this._lp2);\n\t\t\ttemp = this.writeDelay(6, dc * this._lp2 - st * this.readDelay(6)); // tank diffuse 2\n\t\t\t// long delay 2\n\t\t\tthis.writeDelay(7, this.readDelay(6) + st * temp);\n\n\t\t\t// right loop \n\t\t\t// tank diffuse 3\n\t\t\ttemp = this.writeDelay(8, split + dc * this.readDelay(7) + ft * this.readDelayCAt(8, exc2));\n\t\t\t// long delay 3\n\t\t\tthis.writeDelay(9, this.readDelayCAt(8, exc2) - ft * temp);\n\t\t\t// damp 2\n\t\t\tthis._lp3 += dp * (this.readDelay(9) - this._lp3);\n\t\t\t// tank diffuse 4\n\t\t\ttemp = this.writeDelay(10, dc * this._lp3 - st * this.readDelay(10));\n\t\t\t// long delay 4\n\t\t\tthis.writeDelay(11, this.readDelay(10) + st * temp);\n\n\t\t\tlo = this.readDelayAt(9, this._taps[0]) +\n\t\t\t\tthis.readDelayAt(9, this._taps[1]) -\n\t\t\t\tthis.readDelayAt(10, this._taps[2]) +\n\t\t\t\tthis.readDelayAt(11, this._taps[3]) -\n\t\t\t\tthis.readDelayAt(5, this._taps[4]) -\n\t\t\t\tthis.readDelayAt(6, this._taps[5]) -\n\t\t\t\tthis.readDelayAt(7, this._taps[6]);\n\n\t\t\tro = this.readDelayAt(5, this._taps[7]) +\n\t\t\t\tthis.readDelayAt(5, this._taps[8]) -\n\t\t\t\tthis.readDelayAt(6, this._taps[9]) +\n\t\t\t\tthis.readDelayAt(7, this._taps[10]) -\n\t\t\t\tthis.readDelayAt(9, this._taps[11]) -\n\t\t\t\tthis.readDelayAt(10, this._taps[12]) -\n\t\t\t\tthis.readDelayAt(11, this._taps[13]);\n\n\t\t\toutputs[0][0][i] += lo * we;\n\t\t\toutputs[0][1][i] += ro * we;\n\n\t\t\tthis._excPhase += ex;\n\n\t\t\ti++;\n\n\t\t\tfor (let j = 0, d = this._Delays[0]; j < this._Delays.length; d = this._Delays[++j]) {\n\t\t\t\td[1] = (d[1] + 1) & d[3];\n\t\t\t\td[2] = (d[2] + 1) & d[3];\n\t\t\t}\n\t\t}\n\n\t\t// Update preDelay index\n\t\tthis._pDWrite = (this._pDWrite + 128) % this._pDLength;\n\n\t\treturn true;\n\t}\n}\nregisterProcessor('dattorro-reverb', DattorroReverb);\n";
+const fxExtensions = "\n// Various noise type processors for the MonoNoise source\n// Type 2 is Pink noise, used from Tone.Noise('pink') instead of calc\n//\nclass NoiseProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'type',\n\t\t\tdefaultValue: 5,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 5\n\t\t},{\n\t\t\tname: 'density',\n\t\t\tdefaultValue: 0.125,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 1\n\t\t}];\n\t}\n\t\n\tconstructor(){\n\t\tsuper();\n\t\t// sample previous value\n\t\tthis.prev = 0;\n\t\t// latch to a sample \n\t\tthis.latch = 0;\n\t\t// phasor ramp\n\t\tthis.phasor = 0;\n\t\tthis.delta = 0;\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\t// input is not used because this is a source\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\t\tconst HALF_PI = Math.PI/2;\n\n\t\t// for one output channel generate some noise\t\n\t\tif (input.length > 0){\n\t\t\tfor (let i = 0; i < input[0].length; i++){\n\t\t\t\tconst t = (parameters.type.length > 1) ? parameters.type[i] : parameters.type[0];\n\t\t\t\tconst d = (parameters.density.length > 1) ? parameters.density[i] : parameters.density[0];\n\t\t\t\n\t\t\t\t// some bipolar white noise -1 to 1\n\t\t\t\tconst biNoise = Math.random() * 2 - 1;\n\t\t\t\t// empty output\n\t\t\t\tlet out = 0;\n\n\t\t\t\t// White noise, Use for every other choice\n\t\t\t\tif (t < 1){\n\t\t\t\t\tout = biNoise * 0.707;\n\t\t\t\t}\n\t\t\t\t// Pink noise,  use Tone.Noise('pink') object for simplicity\n\t\t\t\telse if (t < 2){\n\t\t\t\t\tout = input[0][i] * 1.413;\n\t\t\t\t}\n\t\t\t\t// Brownian noise\n\t\t\t\t// calculate a random next value in \"step size\" and add to \n\t\t\t\t// the previous noise signal value creating a \"drunk walk\" \n\t\t\t\t// or brownian motion\n\t\t\t\telse if (t < 3){\t\t\n\t\t\t\t\tthis.prev += biNoise * d*d;\n\t\t\t\t\tthis.prev = Math.asin(Math.sin(this.prev * HALF_PI)) / HALF_PI;\n\t\t\t\t\tout = this.prev * 0.707;\n\t\t\t\t}\n\t\t\t\t// Lo-Fi (sampled) noise\n\t\t\t\t// creates random values at a specified frequency and slowly \n\t\t\t\t// ramps to that new value\n\t\t\t\telse if (t < 4){\n\t\t\t\t\t// create a ramp from 0-1 at specific frequency/density\n\t\t\t\t\tthis.phasor = (this.phasor + d * d * 0.5) % 1;\n\t\t\t\t\t// calculate the delta\n\t\t\t\t\tlet dlt = this.phasor - this.delta;\n\t\t\t\t\tthis.delta = this.phasor;\n\t\t\t\t\t// when ramp resets, latch a new noise value\n\t\t\t\t\tif (dlt < 0){\n\t\t\t\t\t\tthis.prev = this.latch;\n\t\t\t\t\t\tthis.latch = biNoise;\n\t\t\t\t\t}\n\t\t\t\t\t// linear interpolation from previous to next point\n\t\t\t\t\tout = this.prev + this.phasor * (this.latch - this.prev);\n\t\t\t\t\tout *= 0.707;\n\t\t\t\t}\n\t\t\t\t// Dust noise\n\t\t\t\t// randomly generate an impulse/click of value 1 depending \n\t\t\t\t// on the density, average amount of impulses per second\n\t\t\t\telse if (t < 5){\n\t\t\t\t\tout = Math.random() > (1 - d*d*d * 0.5);\n\t\t\t\t}\n\t\t\t\t// Crackle noise\n\t\t\t\t// Pink generator with \"wave-loss\" leaving gaps\n\t\t\t\telse {\n\t\t\t\t\tlet delta = input[0][i] - this.prev;\n\t\t\t\t\tthis.prev = input[0][i];\n\t\t\t\t\tif (delta > 0){\n\t\t\t\t\t\tthis.latch = Math.random();\n\t\t\t\t\t}\n\t\t\t\t\tout = (this.latch < (1 - d*d*d)) ? 0 : input[0][i] * 1.413;\n\t\t\t\t}\n\t\t\t\t// send to output whichever noise type was chosen\n\t\t\t\toutput[0][i] = out;\n\t\t\t}\n\t\t}\t\t\n\t\treturn true;\n\t}\n}\nregisterProcessor('noise-processor', NoiseProcessor);\n\n// A Downsampling Chiptune effect. Downsamples the signal by a specified amount\n// Resulting in a lower samplerate, making it sound more like 8bit/chiptune\n// Programmed with a custom AudioWorkletProcessor, see effects/Processors.js\n//\nclass DownSampleProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [{\n\t\t\tname: 'down',\n\t\t\tdefaultValue: 8,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 2048\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t\t// the frame counter\n\t\tthis.count = 0;\n\t\t// sample and hold variable array\n\t\tthis.sah = [];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\t// if there is anything to process\n\t\tif (input.length > 0){\n\t\t\t// for the length of the sample array (generally 128)\n\t\t\tfor (let i=0; i<input[0].length; i++){\n\t\t\t\tconst d = (parameters.down.length > 1) ? parameters.down[i] : parameters.down[0];\n\t\t\t\t// for every channel\n\t\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\t\t// if counter equals 0, sample and hold\n\t\t\t\t\tif (this.count % d === 0){\n\t\t\t\t\t\tthis.sah[channel] = input[channel][i];\n\t\t\t\t\t}\n\t\t\t\t\t// output the currently held sample\n\t\t\t\t\toutput[channel][i] = this.sah[channel];\n\t\t\t\t}\n\t\t\t\t// increment sample counter\n\t\t\t\tthis.count++;\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('downsampler-processor', DownSampleProcessor);\n\n// A distortion algorithm using the tanh (hyperbolic-tangent) as a \n// waveshaping technique. Some mapping to apply a more equal loudness \n// distortion is applied on the overdrive parameter\n//\nclass TanhDistortionProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1\n\t\t}, {\n\t\t\tname: 'makeup',\n\t\t\tdefaultValue: 0.5,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 2\n\t\t}]\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\tconst m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];\n\t\t\t\t\t// simple waveshaping with tanh\n\t\t\t\t\toutput[channel][i] = Math.tanh(input[channel][i] * a) * m;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('tanh-distortion-processor', TanhDistortionProcessor);\n\n// A distortion/compression effect of an incoming signal\n// Based on an algorithm by Peter McCulloch\n// \nclass SquashProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 1024\n\t\t}, {\n\t\t\tname: 'makeup',\n\t\t\tdefaultValue: 0.5,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 2\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\t\t\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\t// (s * a) / ((s * a)^2 * 0.28 + 1) / √a\n\t\t\t\t\t// drive amount, minimum of 1\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\t// makeup gain\n\t\t\t\t\tconst m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];\n\t\t\t\t\t// set the waveshaper effect\n\t\t\t\t\tconst s = input[channel][i];\n\t\t\t\t\tconst x = s * a * 1.412;\n\t\t\t\t\toutput[channel][i] = (x / (x * x * 0.28 + 1.0)) * m * 0.708;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('squash-processor', SquashProcessor);\n\n// Dattorro Reverberator\n// Thanks to port by khoin, taken from:\n// https://github.com/khoin/DattorroReverbNode\n// based on the paper from Jon Dattorro:\n// https://ccrma.stanford.edu/~dattorro/EffectDesignPart1.pdf\n// with small modifications to work in Mercury\n//\n// In jurisdictions that recognize copyright laws, this software is to\n// be released into the public domain.\n\n// THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND.\n// THE AUTHOR(S) SHALL NOT BE LIABLE FOR ANYTHING, ARISING FROM, OR IN\n// CONNECTION WITH THE SOFTWARE OR THE DISTRIBUTION OF THE SOFTWARE.\n// \nclass DattorroReverb extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [\n\t\t\t[\"preDelay\", 0, 0, sampleRate - 1, \"k-rate\"],\n\t\t\t// [\"bandwidth\", 0.9999, 0, 1, \"k-rate\"],\t\n\t\t\t[\"inputDiffusion1\", 0.75, 0, 1, \"k-rate\"],\n\t\t\t[\"inputDiffusion2\", 0.625, 0, 1, \"k-rate\"],\n\t\t\t[\"decay\", 0.5, 0, 1, \"k-rate\"],\n\t\t\t[\"decayDiffusion1\", 0.7, 0, 0.999999, \"k-rate\"],\n\t\t\t[\"decayDiffusion2\", 0.5, 0, 0.999999, \"k-rate\"],\n\t\t\t[\"damping\", 0.005, 0, 1, \"k-rate\"],\n\t\t\t[\"excursionRate\", 0.5, 0, 2, \"k-rate\"],\n\t\t\t[\"excursionDepth\", 0.7, 0, 2, \"k-rate\"],\n\t\t\t[\"wet\", 0.7, 0, 2, \"k-rate\"],\n\t\t\t// [\"dry\", 0.7, 0, 2, \"k-rate\"]\n\t\t].map(x => new Object({\n\t\t\tname: x[0],\n\t\t\tdefaultValue: x[1],\n\t\t\tminValue: x[2],\n\t\t\tmaxValue: x[3],\n\t\t\tautomationRate: x[4]\n\t\t}));\n\t}\n\n\tconstructor(options) {\n\t\tsuper(options);\n\n\t\tthis._Delays = [];\n\t\t// Pre-delay is always one-second long, rounded to the nearest 128-chunk\n\t\tthis._pDLength = sampleRate + (128 - sampleRate % 128);\n\t\tthis._preDelay = new Float32Array(this._pDLength);\n\t\tthis._pDWrite = 0;\n\t\tthis._lp1 = 0.0;\n\t\tthis._lp2 = 0.0;\n\t\tthis._lp3 = 0.0;\n\t\tthis._excPhase = 0.0;\n\n\t\t[\n\t\t\t0.004771345, 0.003595309, 0.012734787, 0.009307483, // pre-tank\n\t\t\t0.022579886, 0.149625349, 0.060481839, 0.1249958, // left-loop\n\t\t\t0.030509727, 0.141695508, 0.089244313, 0.106280031 // right-loop\n\t\t].forEach(x => this.makeDelay(x));\n\n\t\tthis._taps = Int16Array.from([\n\t\t\t0.008937872, 0.099929438, 0.064278754, 0.067067639, \n\t\t\t0.066866033, 0.006283391, 0.035818689, // left-output\n\t\t\t0.011861161, 0.121870905, 0.041262054, 0.08981553, \n\t\t\t0.070931756, 0.011256342, 0.004065724 // right-output\n\t\t], x => Math.round(x * sampleRate));\n\t}\n\n\tmakeDelay(length) {\n\t\t// len, array, write, read, mask\n\t\tlet len = Math.round(length * sampleRate);\n\t\tlet nextPow2 = 2 ** Math.ceil(Math.log2((len)));\n\t\tthis._Delays.push([\n\t\t\tnew Float32Array(nextPow2), len - 1, 0 | 0, nextPow2 - 1\n\t\t]);\n\t}\n\n\twriteDelay(index, data) {\n\t\treturn this._Delays[index][0][this._Delays[index][1]] = data;\n\t}\n\n\treadDelay(index) {\n\t\treturn this._Delays[index][0][this._Delays[index][2]];\n\t}\n\n\treadDelayAt(index, i) {\n\t\tlet d = this._Delays[index];\n\t\treturn d[0][(d[2] + i) & d[3]];\n\t}\n\n\t// cubic interpolation\n\t// O. Niemitalo: \n\t// https://www.musicdsp.org/en/latest/Other/49-cubic-interpollation.html\n\treadDelayCAt(index, i) {\n\t\tlet d = this._Delays[index],\n\t\t\tfrac = i - ~~i,\n\t\t\tint = ~~i + d[2] - 1,\n\t\t\tmask = d[3];\n\n\t\tlet x0 = d[0][int++ & mask],\n\t\t\tx1 = d[0][int++ & mask],\n\t\t\tx2 = d[0][int++ & mask],\n\t\t\tx3 = d[0][int & mask];\n\n\t\tlet a = (3 * (x1 - x2) - x0 + x3) / 2,\n\t\t\tb = 2 * x2 + x0 - (5 * x1 + x3) / 2,\n\t\t\tc = (x2 - x0) / 2;\n\n\t\treturn (((a * frac) + b) * frac + c) * frac + x1;\n\t}\n\n\t// First input will be downmixed to mono if number of channels is not 2\n\t// Outputs Stereo.\n\tprocess(inputs, outputs, parameters) {\n\t\tconst pd = ~~parameters.preDelay[0],\n\t\t\t// bw = parameters.bandwidth[0], // replaced by using damping\n\t\t\tfi = parameters.inputDiffusion1[0],\n\t\t\tsi = parameters.inputDiffusion2[0],\n\t\t\tdc = parameters.decay[0],\n\t\t\tft = parameters.decayDiffusion1[0],\n\t\t\tst = parameters.decayDiffusion2[0],\n\t\t\tdp = 1 - parameters.damping[0],\n\t\t\tex = parameters.excursionRate[0] / sampleRate,\n\t\t\ted = parameters.excursionDepth[0] * sampleRate / 1000,\n\t\t\twe = parameters.wet[0]; //* 0.6, // lo & ro both mult. by 0.6 anyways\n\t\t\t// dr = parameters.dry[0];\n\n\t\t// write to predelay and dry output\n\t\tif (inputs[0].length == 2) {\n\t\t\tfor (let i = 127; i >= 0; i--) {\n\t\t\t\tthis._preDelay[this._pDWrite + i] = (inputs[0][0][i] + inputs[0][1][i]) * 0.5;\n\n\t\t\t\t// removed the dry parameter, this is handled in the Tone Node\n\t\t\t\t// outputs[0][0][i] = inputs[0][0][i] * dr;\n\t\t\t\t// outputs[0][1][i] = inputs[0][1][i] * dr;\n\t\t\t}\n\t\t} else if (inputs[0].length > 0) {\n\t\t\tthis._preDelay.set(\n\t\t\t\tinputs[0][0],\n\t\t\t\tthis._pDWrite\n\t\t\t);\n\t\t\t// for (let i = 127; i >= 0; i--)\n\t\t\t// \toutputs[0][0][i] = outputs[0][1][i] = inputs[0][0][i] * dr;\n\t\t} else {\n\t\t\tthis._preDelay.set(\n\t\t\t\tnew Float32Array(128),\n\t\t\t\tthis._pDWrite\n\t\t\t);\n\t\t}\n\n\t\tlet i = 0 | 0;\n\t\twhile (i < 128) {\n\t\t\tlet lo = 0.0,\n\t\t\t\tro = 0.0;\n\n\t\t\t// input damping (formerly known as bandwidth bw, now uses dp)\n\t\t\tthis._lp1 += dp * (this._preDelay[(this._pDLength + this._pDWrite - pd + i) % this._pDLength] - this._lp1);\n\n\t\t\t// pre-tank\n\t\t\tlet pre = this.writeDelay(0, this._lp1 - fi * this.readDelay(0));\n\t\t\tpre = this.writeDelay(1, fi * (pre - this.readDelay(1)) + this.readDelay(0));\n\t\t\tpre = this.writeDelay(2, fi * pre + this.readDelay(1) - si * this.readDelay(2));\n\t\t\tpre = this.writeDelay(3, si * (pre - this.readDelay(3)) + this.readDelay(2));\n\n\t\t\tlet split = si * pre + this.readDelay(3);\n\n\t\t\t// excursions\n\t\t\t// could be optimized?\n\t\t\tlet exc = ed * (1 + Math.cos(this._excPhase * 6.2800));\n\t\t\tlet exc2 = ed * (1 + Math.sin(this._excPhase * 6.2847));\n\n\t\t\t// left loop\n\t\t\t// tank diffuse 1\n\t\t\tlet temp = this.writeDelay(4, split + dc * this.readDelay(11) + ft * this.readDelayCAt(4, exc));\n\t\t\t// long delay 1\n\t\t\tthis.writeDelay(5, this.readDelayCAt(4, exc) - ft * temp);\n\t\t\t// damp 1\n\t\t\tthis._lp2 += dp * (this.readDelay(5) - this._lp2);\n\t\t\ttemp = this.writeDelay(6, dc * this._lp2 - st * this.readDelay(6)); // tank diffuse 2\n\t\t\t// long delay 2\n\t\t\tthis.writeDelay(7, this.readDelay(6) + st * temp);\n\n\t\t\t// right loop \n\t\t\t// tank diffuse 3\n\t\t\ttemp = this.writeDelay(8, split + dc * this.readDelay(7) + ft * this.readDelayCAt(8, exc2));\n\t\t\t// long delay 3\n\t\t\tthis.writeDelay(9, this.readDelayCAt(8, exc2) - ft * temp);\n\t\t\t// damp 2\n\t\t\tthis._lp3 += dp * (this.readDelay(9) - this._lp3);\n\t\t\t// tank diffuse 4\n\t\t\ttemp = this.writeDelay(10, dc * this._lp3 - st * this.readDelay(10));\n\t\t\t// long delay 4\n\t\t\tthis.writeDelay(11, this.readDelay(10) + st * temp);\n\n\t\t\tlo = this.readDelayAt(9, this._taps[0]) +\n\t\t\t\tthis.readDelayAt(9, this._taps[1]) -\n\t\t\t\tthis.readDelayAt(10, this._taps[2]) +\n\t\t\t\tthis.readDelayAt(11, this._taps[3]) -\n\t\t\t\tthis.readDelayAt(5, this._taps[4]) -\n\t\t\t\tthis.readDelayAt(6, this._taps[5]) -\n\t\t\t\tthis.readDelayAt(7, this._taps[6]);\n\n\t\t\tro = this.readDelayAt(5, this._taps[7]) +\n\t\t\t\tthis.readDelayAt(5, this._taps[8]) -\n\t\t\t\tthis.readDelayAt(6, this._taps[9]) +\n\t\t\t\tthis.readDelayAt(7, this._taps[10]) -\n\t\t\t\tthis.readDelayAt(9, this._taps[11]) -\n\t\t\t\tthis.readDelayAt(10, this._taps[12]) -\n\t\t\t\tthis.readDelayAt(11, this._taps[13]);\n\n\t\t\toutputs[0][0][i] += lo * we;\n\t\t\toutputs[0][1][i] += ro * we;\n\n\t\t\tthis._excPhase += ex;\n\n\t\t\ti++;\n\n\t\t\tfor (let j = 0, d = this._Delays[0]; j < this._Delays.length; d = this._Delays[++j]) {\n\t\t\t\td[1] = (d[1] + 1) & d[3];\n\t\t\t\td[2] = (d[2] + 1) & d[3];\n\t\t\t}\n\t\t}\n\n\t\t// Update preDelay index\n\t\tthis._pDWrite = (this._pDWrite + 128) % this._pDLength;\n\n\t\treturn true;\n\t}\n}\nregisterProcessor('dattorro-reverb', DattorroReverb);\n";
 Tone.getContext().addAudioWorkletModule(URL.createObjectURL(new Blob([ fxExtensions ], { type: 'text/javascript' })));
 
 // Mercury main class controls Tone and loads samples
@@ -19050,5 +19162,5 @@ class Mercury extends MercuryInterpreter {
 	// }
 }
 module.exports = { Mercury };
-},{"./core/Util.js":66,"./interpreter":68,"tone":44,"webmidi":55}]},{},[69])(69)
+},{"./core/Util.js":67,"./interpreter":69,"tone":44,"webmidi":55}]},{},[70])(70)
 });

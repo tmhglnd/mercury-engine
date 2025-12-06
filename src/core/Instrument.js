@@ -20,6 +20,7 @@ class Instrument extends Sequencer {
 		this.adsr;
 		this.panner;
 		this.gain;
+		this.post;
 		this._fx;
 
 		// The source to be defined by inheriting class
@@ -31,8 +32,10 @@ class Instrument extends Sequencer {
 	channelStrip(){
 		// gain => output
 		this.gain = new Tone.Gain(0, "normalRange").toDestination();
+		// postfx-gain => gain (for gain() function in instrument)
+		this.post = new Tone.Gain(1, "gain").connect(this.gain);
 		// panning => gain
-		this.panner = new Tone.Panner(0).connect(this.gain);
+		this.panner = new Tone.Panner(0).connect(this.post);
 		// adsr => panning
 		this.adsr = this.envelope(this.panner);
 		// return Node to connect source => adsr
@@ -71,9 +74,12 @@ class Instrument extends Sequencer {
 		this.panner.pan.setValueAtTime(p, time);
 
 		// ramp volume
-		let g = Util.atodb(Util.getParam(this._gain[0], c) * 0.707);
+		// let g = Util.atodb(Util.getParam(this._gain[0], c) * 0.707);
+		let g = Util.getParam(this._gain[0], c) * 0.707;
 		let r = Util.msToS(Math.max(0, Util.getParam(this._gain[1], c)));
-		this.source.volume.rampTo(g, r, time);
+		// this.source.volume.rampTo(g, r, time);
+		this.source.volume.setValueAtTime(1, time);
+		this.post.gain.rampTo(g, r, time);
 
 		this.sourceEvent(c, e, time);
 
@@ -154,6 +160,9 @@ class Instrument extends Sequencer {
 		this.gain.disconnect();
 		this.gain.dispose();
 
+		this.post.disconnect();
+		this.post.dispose();
+
 		this.panner.disconnect();
 		this.panner.dispose();
 
@@ -164,7 +173,7 @@ class Instrument extends Sequencer {
 		this.source?.stop();
 		this.source?.disconnect();
 		this.source?.dispose();
-		// this.adsr.dispose();
+
 		// remove all fx
 		this._fx.map((f) => f.delete());
 		console.log('=> disposed Instrument() with FX:', this._fx);
@@ -214,7 +223,7 @@ class Instrument extends Sequencer {
 	add_fx(...fx){
 		// the effects chain for the sound
 		this._fx = [];
-		// console.log('Effects currently disabled');
+
 		fx.forEach((f) => {
 			if (fxMap[f[0]]){
 				let tmpF = fxMap[f[0]](f.slice(1));
@@ -236,14 +245,15 @@ class Instrument extends Sequencer {
 			// allowing to chain multiple effects within one process
 			let pfx = this._ch[0];
 			this.panner.connect(pfx.send);
-			for (let f=1; f<this._ch.length; f++){
+			for (let f = 1; f < this._ch.length; f++){
 				if (pfx){
 					pfx.return.connect(this._ch[f].send);
 				}
 				pfx = this._ch[f];
 			}
 			// pfx.return.connect(Tone.Destination);
-			pfx.return.connect(this.gain);
+			// pfx.return.connect(this.gain);
+			pfx.return.connect(this.post);
 		}
 	}
 }

@@ -1,5 +1,5 @@
 
-const Tone = require('tone');
+// const Tone = require('tone');
 const Mercury = require('mercury-lang');
 const TL = require('total-serialism').Translate;
 const { normalize, multiply } = require('total-serialism').Utility;
@@ -7,13 +7,13 @@ const { normalize, multiply } = require('total-serialism').Utility;
 const MonoSample = require('./core/MonoSample.js');
 const MonoMidi = require('./core/MonoMidi.js');
 const MonoSynth = require('./core/MonoSynth.js');
+const MonoNoise = require('./core/MonoNoise.js');
 const MonoInput = require('./core/MonoInput.js');
 const PolySynth = require('./core/PolySynth.js');
 const PolySample = require('./core/PolySample.js');
 const Tempos = require('./data/genre-tempos.json');
 const Util = require('./core/Util.js');
 const { divToS } = require('./core/Util.js');
-const { count } = require('total-serialism/src/gen-basic.js');
 
 class MercuryInterpreter {
 	constructor({ hydra, p5canvas } = {}){
@@ -240,6 +240,11 @@ class MercuryInterpreter {
 			},
 			'synth' : (obj) => {		
 				let inst = new MonoSynth(this, obj.type, this.canvas);
+				objectMap.applyFunctions(obj.functions, inst, obj.type);
+				return inst;
+			},
+			'noise' : (obj) => {
+				let inst = new MonoNoise(this, obj.type, this.canvas);
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
