@@ -28,6 +28,12 @@ const fxMap = {
 	'comp' : (params) => {
 		return new Compressor(params);
 	},
+	'comb' : (params) => {
+		return new CombFilter(params);
+	},
+	'karplus' : (params) => {
+		return new CombFilter(params);
+	},
 	'lfo' : (params) => {
 		return new LFO(params);
 	},
@@ -116,6 +122,63 @@ function disposeNodes(nodes=[]) {
 		n?.disconnect();
 		n?.dispose();
 	});
+}
+
+// A Lowpass Feedback CombFiltering effect
+// Adds a short feedback delay to the sound based on a specific note
+// resulting in a tonal output, like the resonating sound of a string 
+// sometimes also called Karplus Strong String Synthesis.
+// Negative feedback is possible for generating odd harmonics
+//
+const CombFilter = function(_params) {
+	// the default parameters
+	_params = Util.mapDefaults(_params, [0, 0.8, 0.5, 0.5]);
+	this._pitch = Util.toArray(_params[0]);
+	this._fback = Util.toArray(_params[1]);
+	this._damp = Util.toArray(_params[2]);
+	this._wet = Util.toArray(_params[3]);
+
+	// ToneAudioNode has all the tone effect parameters
+	this._fx = new Tone.ToneAudioNode();
+
+	// A gain node for connecting with input and output
+	this._fx.input = new Tone.Gain(1);
+	this._fx.output = new Tone.Gain(1);
+	// the fx processor
+	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('combfilter-processor');
+	// connect input, fx and output
+	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+
+	this.set = (count, time, bpm) => {
+		const pitch = Util.toMidi(Util.getParam(this._pitch, count));
+		const _dt = 1000 / Util.mtof(pitch);
+		
+		// some mapping for the feedback to make it logarithmic in length
+		let _fb = Util.getParam(this._fback, count);
+		let sign = _fb < 0 ? -1 : 1;
+		_fb = Util.clip(Math.pow(Math.abs(_fb), 0.1) * sign, -0.999, 0.999);
+
+		const _dm = Util.clip(Util.getParam(this._damp, count));
+		const _dw = Util.clip(Util.getParam(this._wet, count));
+		
+		// get parameters from workletprocessor
+		const dt = this._fx.workletNode.parameters.get('time');	
+		dt.setValueAtTime(_dt, time);
+		const fb = this._fx.workletNode.parameters.get('feedback');	
+		fb.setValueAtTime(_fb, time);
+		const dm = this._fx.workletNode.parameters.get('damping');	
+		dm.setValueAtTime(_dm, time);
+		const dw = this._fx.workletNode.parameters.get('drywet');	
+		dw.setValueAtTime(_dw, time);
+	}
+
+	this.chain = () => {
+		return { 'send' : this._fx, 'return' : this._fx }
+	}
+
+	this.delete = () => {
+		disposeNodes([this._fx.input, this._fx.output, this._fx]);
+	}
 }
 
 // A formant/vowel filter. With this filter you can imitate the vowels of human 
@@ -587,8 +650,7 @@ const DattorroReverb = function(_params){
 	}
 
 	this.delete = () => {
-		const nodes = [ this._fx, this._mix, this._mixDry, this._fx.input, this._fx.output ];
-		nodes.forEach(n => { n.disconnect(); n.dispose() });
+		disposeNodes([ this._fx, this._mix, this._mixDry, this._mixWet, this._fx.input, this._fx.output ]);
 	}
 }
 

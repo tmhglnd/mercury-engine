@@ -331,6 +331,99 @@ class SquashProcessor extends AudioWorkletProcessor {
 }
 registerProcessor('squash-processor', SquashProcessor);
 
+// Comb Filter processor
+// A LowPass FeedBack CombFilter effect (LBCF)
+// Uses a onepole lowpass filter in the feedback delay for damping
+// Feedback amount can be positive or negative 
+// (negative creates odd harmonics one octave lower)
+// 
+class CombFilterProcessor extends AudioWorkletProcessor {
+	static get parameterDescriptors() {
+		return [
+			[ 'time', 5, 0, 120, "k-rate" ],
+			[ 'feedback', 0.8, -0.999, 0.999, "k-rate" ],
+			[ 'damping', 0.5, 0, 1, "k-rate" ],
+			[ 'drywet', 0.8, 0, 1, "k-rate" ]
+		].map(x => new Object({
+			name: x[0],
+			defaultValue: x[1],
+			minValue: x[2],
+			maxValue: x[3],
+			automationRate: x[4]
+		}));
+	}
+	
+	constructor(info) {
+		super();
+
+		const numChannels = info.channelCount;
+		const delaySize = 120;
+		// make delays for amount of channels and
+		// initialize history values for lowpass
+		this.delays = [];
+		this.lpf = [];
+		for (let i = 0; i < numChannels; i++){
+			this.delays[i] = this.makeDelay(delaySize);
+			this.lpf[i] = 0;
+		}
+	}
+
+	// makeDelay code based on Dattorro Reverberator delays
+	// Thanks to khoin: https://github.com/khoin
+	makeDelay(length) {
+		let size = Math.round(length * 0.001 * sampleRate);
+		let nextPow2 = 2 ** Math.ceil(Math.log2((size)));
+		return [
+			new Float32Array(nextPow2), nextPow2-1, 0, nextPow2 - 1
+		];
+	}
+	// write to specific delayline at delaysize
+	writeDelay(i, data) {
+		return this.delays[i][0][this.delays[i][1]] = data;
+	}
+
+	// read from delayline at specified time
+	readDelayAt(i, ms) {
+		let s = Math.round(ms * 0.001 * sampleRate);
+		return this.delays[i][0][(this.delays[i][2] - s) & this.delays[i][3]];
+	}
+
+	// move the read and writeheads of the delayline
+	updateReadWriteHeads(i){
+		// increment read and write heads in delay and wrap at delaysize
+		this.delays[i][1] = (this.delays[i][1] + 1) & this.delays[i][3];
+		this.delays[i][2] = (this.delays[i][2] + 1) & this.delays[i][3];
+	}
+
+	process(inputs, outputs, parameters){
+		const input = inputs[0];
+		const output = outputs[0];
+
+		const dt = parameters.time[0];
+		const fb = parameters.feedback[0];
+		const dm = Math.max(0, parameters.damping[0]);
+		const dw = parameters.drywet[0];
+
+		// process for every channel and every sample in the channel
+		if (input.length > 0){
+			for (let channel = 0; channel < input.length; channel++){
+				for (let i = 0; i < input[0].length; i++){
+					// a onepole lowpass filter after delay
+					this.lpf[channel] = this.readDelayAt(channel, dt) * (1 - dm) + this.lpf[channel] * dm;
+					// write to the delayline 
+					this.writeDelay(channel, input[channel][i] + this.lpf[channel] * fb);
+					// apply drywet and send output from the filter
+					output[channel][i] = this.lpf[channel] * dw + input[channel][i] * (1-dw);
+					// update the read and write heads of the delaylines
+					this.updateReadWriteHeads(channel);
+				}
+			}
+		}
+		return true;
+	}
+}
+registerProcessor('combfilter-processor', CombFilterProcessor);
+
 // Dattorro Reverberator
 // Thanks to port by khoin, taken from:
 // https://github.com/khoin/DattorroReverbNode
