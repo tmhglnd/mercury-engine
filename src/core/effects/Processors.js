@@ -473,19 +473,13 @@ registerProcessor('fuzz-processor', FuzzProcessor);
 // A distortion/compression effect of an incoming signal
 // Based on an algorithm by Peter McCulloch
 // 
-class SquashProcessor extends AudioWorkletProcessor {
+class SquashProcessor extends ExtendedWorkletProcessor {
 	static get parameterDescriptors(){
-		return [{
-			name: 'amount',
-			defaultValue: 4,
-			minValue: 1,
-			maxValue: 1024
-		}, {
-			name: 'makeup',
-			defaultValue: 0.5,
-			minValue: 0,
-			maxValue: 2
-		}];
+		return formatDescriptors([
+			[ 'amount', 4, 1, 1024, 'a-rate' ],
+			[ 'makeup', 0.5, 0, 2, 'a-rate' ],
+			[ 'drywet', 1, 0, 1, 'a-rate' ]
+		]);
 	}
 
 	constructor(){
@@ -504,14 +498,17 @@ class SquashProcessor extends AudioWorkletProcessor {
 					const a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];
 					// makeup gain
 					const m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];
+					// drywet balance
+					const dw = (parameters.drywet.length > 1)? parameters.drywet[i] : parameters.drywet[0];
 					// set the waveshaper effect
 					const s = input[channel][i];
 					const x = s * a * 1.412;
-					output[channel][i] = (x / (x * x * 0.28 + 1.0)) * m * 0.708;
+					const out = (x / (x * x * 0.28 + 1.0)) * m * 0.708;
+					output[channel][i] = mix(input[channel][i], out, dw);
 				}
 			}
 		}
-		return true;
+		return this.running;
 	}
 }
 registerProcessor('squash-processor', SquashProcessor);
