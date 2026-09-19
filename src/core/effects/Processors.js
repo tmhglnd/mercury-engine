@@ -355,7 +355,7 @@ class DownSampleProcessor extends ExtendedWorkletProcessor {
 			for (let i=0; i<input[0].length; i++){
 				const d = parameters.down[i] ?? parameters.down[0];
 				const dw = parameters.drywet[i] ?? parameters.drywet[0];
-				
+
 				// for every channel
 				for (let channel=0; channel<input.length; ++channel){
 					// if counter equals 0, sample and hold
@@ -375,47 +375,6 @@ class DownSampleProcessor extends ExtendedWorkletProcessor {
 	}
 }
 registerProcessor('downsampler-processor', DownSampleProcessor);
-
-// A distortion algorithm using the tanh (hyperbolic-tangent) as a 
-// waveshaping technique. Some mapping to apply a more equal loudness 
-// distortion is applied on the overdrive parameter
-//
-class TanhDistortionProcessor extends AudioWorkletProcessor {
-	static get parameterDescriptors(){
-		return [{
-			name: 'amount',
-			defaultValue: 4,
-			minValue: 1
-		}, {
-			name: 'makeup',
-			defaultValue: 0.5,
-			minValue: 0,
-			maxValue: 2
-		}]
-	}
-
-	constructor(){
-		super();
-	}
-
-	process(inputs, outputs, parameters){
-		const input = inputs[0];
-		const output = outputs[0];
-
-		if (input.length > 0){
-			for (let channel=0; channel<input.length; ++channel){
-				for (let i=0; i<input[channel].length; i++){
-					const a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];
-					const m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];
-					// simple waveshaping with tanh
-					output[channel][i] = Math.tanh(input[channel][i] * a) * m;
-				}
-			}
-		}
-		return true;
-	}
-}
-registerProcessor('tanh-distortion-processor', TanhDistortionProcessor);
 
 // A distortion algorithm using the arctan function as a 
 // waveshaping technique. Some mapping to apply a more equal loudness 
