@@ -513,6 +513,130 @@ class SquashProcessor extends ExtendedWorkletProcessor {
 }
 registerProcessor('squash-processor', SquashProcessor);
 
+// Waveloss FX
+// The waveloss effect gradually drops sound (reduces it to 0) between detected
+// zero-crossings in the signal. This is based on a probability. The amount
+// increases the probability that the signal will be dropped.
+// Inspired by Supercollider waveloss function. 
+// The technique was described by Trevor Wishart in a lecture.
+// 
+class WavelossProcessor extends ExtendedWorkletProcessor {
+	static get parameterDescriptors(){
+		return formatDescriptors([
+			['amount', 0.5, 0, 1, 'k-rate'],
+			['drywet', 1, 0, 1, 'k-rate']
+		])
+	}
+
+	constructor(){
+		super();
+
+		this.prev = [];
+		this.prob = [];
+	}
+
+	process(inputs, outputs, parameters){
+		const input = inputs[0];
+		const output = outputs[0];
+		const amt = parameters.amount[0];
+
+		if (input.length > 0){
+			for (let c = 0; c < input.length; c++){
+				this.prob[c] = this.prob[c] ?? 0;
+				
+				for (let i = 0; i < input[c].length; i++){
+					// take the sign and find the zero-crossing
+					const sign = (input[c][i] > 0) ? 1 : -1;
+					const change = sign != (this.prev[c] ?? 0);
+					this.prev[c] = sign;
+
+					// when zerocrossing, sample from noise for probability
+					if (change){ this.prob[c] = Math.random(); }
+
+					// waveloss when probabilty is higher than amount
+					output[c][i] = (this.prob[c] > amt) ? input[c][i] : 0;
+				}
+			}
+		}
+		return this.running;
+	}
+}
+registerProcessor('waveloss-processor', WavelossProcessor);
+
+// Hal Chamberlin State Variable Filter. Improved version, basedon the paper:
+// Improving the Digital Chamberlin State Variable Filter
+// Updated version based on the paper https://arxiv.org/pdf/2111.05592
+// by Victor Lazzarini and Joseph Timoney, 2022
+// ported to gen~ and later JS by Timo Hoogland, 2026
+// Other useful resource on SVF: 
+// https://www.earlevel.com/main/2003/03/02/the-digital-state-variable-filter/
+// 
+class StateVariableFilter extends ExtendedWorkletProcessor {
+	static get parameterDescriptors() {
+		return formatDescriptors([
+			[ 'frequency', 500, 0, 18000, "a-rate" ],
+			[ 'resonance', 0.1, 0.001, 0.999, "k-rate" ],
+			[ 'type', 0, 0, 3, "k-rate" ],
+		]);
+	}
+
+	constructor(){
+		super();
+		// history values for single sample feedback
+		this.h1 = [];
+		this.h2 = [];
+	}
+
+	process(inputs, outputs, parameters){
+		const input = inputs[0];
+		const output = outputs[0];
+
+		const freq = parameters.frequency[0];
+		const res = parameters.resonance[0];
+		const type = parameters.type[0];
+
+		const Q = Math.pow(res, 6) * 99 + 1;
+		const q1 = Math.max(0, Math.min(250, Q));
+		const cf = Math.tan(Math.PI * freq / sampleRate);
+
+		if (input.length > 0){
+			for (let channel = 0; channel < input.length; channel++){
+				// initalize with 0's;
+				this.h1[channel] = this.h1[channel] ?? 0;
+				this.h2[channel] = this.h2[channel] ?? 0;
+	
+				for (let i = 0; i < input[channel].length; i++){
+					const kdiv = 1 + cf / q1 + cf*cf;
+					const highp = (input[channel][i] - (1 / q1 + cf) * this.h1[channel] - this.h2[channel]) / kdiv;
+	
+					let tmp = highp * cf;
+			
+					const bandp = tmp + this.h1[channel];
+					this.h1[channel] = tmp + bandp;
+			
+					tmp = bandp * cf;
+					const lowp = tmp + this.h2[channel];
+					this.h2[channel] = tmp + lowp;
+			
+					if (type < 1){
+						output[channel][i] = lowp;
+					} else if (type < 2){
+						output[channel][i] = highp;
+					} else {
+						output[channel][i] = bandp;
+					} 
+					// else {
+					//  notch output disabled
+					// 	output[channel][i] = highp + lowp; //notch output
+					// }
+				}
+			}
+		}
+		return this.running;
+	}
+}
+registerProcessor('state-variable-filter', StateVariableFilter);
+
 // Comb Filter processor
 // A LowPass FeedBack CombFilter effect (LBCF)
 // Uses a onepole lowpass filter in the feedback delay for damping
