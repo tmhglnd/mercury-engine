@@ -6,6 +6,7 @@ const { clip, divToS, fractToFloat } = require('./Util.js');
 const { fixNan, fixNonFinite } = require('./Util.js');
 const { checkFiltertype, filtertypeIndex } = require('./Util.js');
 const { assertLfoWave, lfoTimeCorrection } = require('./Util.js');
+const { toMidi, mtof, divToF, remap } = require('./Util.js');
 
 // all the available effects
 const fxMap = {
@@ -76,6 +77,13 @@ const fxMap = {
 	// 	return new PitchShift(params);
 	// },
 	'filter' : (params) => {
+		if (params.length < 4){
+			return new SVF(params);
+		} else {
+			return new AutoSVF(params);
+		}
+	},
+	'oldFilter' : (params) => {
 		return new Filter(params);
 	},
 	'triggerFilter' : (params) => {
@@ -84,12 +92,12 @@ const fxMap = {
 	'envFilter' : (params) => {
 		return new TriggerFilter(params);
 	},
-	/*'autoFilter' : (params) => {
-		return new AutoFilter(params);
+	'autoFilter' : (params) => {
+		return new AutoSVF(params);
 	},
 	'wobble' : (params) => {
-		return fxMap.autoFilter(params);
-	},*/
+		return new AutoSVF(params);
+	},
 	'delay' : (params) => {
 		return new Delay(params);
 	},
@@ -160,6 +168,7 @@ const disposeNodes = function(nodes=[]) {
 	});
 }
 
+// FeedbackLowpassCombFilter (LBCF) FX
 // A Lowpass Feedback CombFiltering effect
 // Adds a short feedback delay to the sound based on a specific note
 // resulting in a tonal output, like the resonating sound of a string 
@@ -168,44 +177,32 @@ const disposeNodes = function(nodes=[]) {
 //
 const CombFilter = function(_params) {
 	// the default parameters
-	_params = Util.mapDefaults(_params, [0, 0.8, 0.5, 0.5]);
-	this._pitch = Util.toArray(_params[0]);
-	this._fback = Util.toArray(_params[1]);
-	this._damp = Util.toArray(_params[2]);
-	this._wet = Util.toArray(_params[3]);
+	_params = mapDefaults(_params, [0, 0.8, 0.5, 0.5]);
+	this._pitch = _params[0];
+	this._fback = _params[1];
+	this._damp = _params[2];
+	this._wet = _params[3];
 
-	// ToneAudioNode has all the tone effect parameters
-	this._fx = new Tone.ToneAudioNode();
-
-	// A gain node for connecting with input and output
-	this._fx.input = new Tone.Gain(1);
-	this._fx.output = new Tone.Gain(1);
-	// the fx processor
-	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('combfilter-processor');
-	// connect input, fx and output
-	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+	// load a worklet FX in a ToneAudioNode
+	this._fx = workletFX('combfilter-processor');
 
 	this.set = (count, time, bpm) => {
-		const pitch = Util.toMidi(Util.getParam(this._pitch, count));
-		const _dt = 1000 / Util.mtof(pitch);
+		const pitch = toMidi(getParam(this._pitch, count));
+		const _dt = 1000 / mtof(pitch);
 		
 		// some mapping for the feedback to make it logarithmic in length
-		let _fb = Util.getParam(this._fback, count);
+		let _fb = getParam(this._fback, count);
 		let sign = _fb < 0 ? -1 : 1;
-		_fb = Util.clip(Math.pow(Math.abs(_fb), 0.1) * sign, -0.999, 0.999);
+		_fb = clip(Math.pow(Math.abs(_fb), 0.1) * sign, -0.999, 0.999);
 
-		const _dm = Util.clip(Util.getParam(this._damp, count));
-		const _dw = Util.clip(Util.getParam(this._wet, count));
+		const _dm = clip(getParam(this._damp, count));
+		const _dw = clip(getParam(this._wet, count));
 		
-		// get parameters from workletprocessor
-		const dt = this._fx.workletNode.parameters.get('time');	
-		dt.setValueAtTime(_dt, time);
-		const fb = this._fx.workletNode.parameters.get('feedback');	
-		fb.setValueAtTime(_fb, time);
-		const dm = this._fx.workletNode.parameters.get('damping');	
-		dm.setValueAtTime(_dm, time);
-		const dw = this._fx.workletNode.parameters.get('drywet');	
-		dw.setValueAtTime(_dw, time);
+		// set parameters for workletprocessor
+		setParam(this._fx, 'time', _dt, time);
+		setParam(this._fx, 'feedback', _fb, time);
+		setParam(this._fx, 'damping', _dm, time);
+		setParam(this._fx, 'drywet', _dw, time);
 	}
 
 	this.chain = () => {
@@ -213,7 +210,8 @@ const CombFilter = function(_params) {
 	}
 
 	this.delete = () => {
-		disposeNodes([this._fx.input, this._fx.output, this._fx]);
+		this._fx.workletNode.port.postMessage('dispose');
+		disposeNodes([ this._fx.input, this._fx.output, this._fx ]);
 	}
 }
 
@@ -318,157 +316,104 @@ const FormantFilter = function(_params){
 	}
 }
 
+// Downsampling FX
 // A Downsampling Chiptune effect. Downsamples the signal by a specified amount
 // Resulting in a lower samplerate, making it sound more like 8bit/chiptune
 // Programmed with a custom AudioWorkletProcessor, see effects/Processors.js
 //
 const DownSampler = function(_params){
 	// apply the default values and convert to arrays where necessary
-	_params = Util.mapDefaults(_params, [ 0.5, 1 ]);
-	this._down = Util.toArray(_params[0]);
-	this._wet = Util.toArray(_params[1]);
-	
-	// ToneAudioNode has all the tone effect parameters
-	this._fx = new Tone.ToneAudioNode();
+	_params = mapDefaults(_params, [ 0.5, 1 ]);
+	this._down = _params[0];
+	this._wet = _params[1];
 
-	// The crossfader mix
-	this._mix = new Tone.Add();
-	this._mixDry = new Tone.Gain(0).connect(this._mix.input);
-	// this._mixWet = new Tone.Gain(0.5).connect(this._mix.addend);
-	
-	// A gain node for connecting with input and output
-	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
-	this._fx.output = new Tone.Gain(1).connect(this._mix.addend);
-
-	// the fx processor
-	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('downsampler-processor');
-
-	// connect input, fx and output
-	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+	// load a worklet FX in a ToneAudioNode
+	this._fx = workletFX('downsampler-processor');
 
 	this.set = function(c, time, bpm){
 		// some parameter mapping changing input range 0-1 to 1-inf
-		const p = this._fx.workletNode.parameters.get('down');
-		const d = Math.floor(1 / (1 - Util.clip(Util.getParam(this._down, c) ** 0.25, 0, 0.999)));
-
-		p.setValueAtTime(Util.assureNum(d), time);
-
-		const w = Util.clip(Util.getParam(this._wet, c), 0, 1);
-		this._fx.output.gain.setValueAtTime(w, time);
-		this._mixDry.gain.setValueAtTime(1 - w, time);
+		const d = Math.floor(1 / (1 - clip(getParam(this._down, c) ** 0.25, 0, 0.999)));
+		// the drywet amount clamped between 0 and 1
+		const w = clip(getParam(this._wet, c), 0, 1);
+		
+		setParam(this._fx, 'down', d, time);
+		setParam(this._fx, 'drywet', w, time);
 	}
 
 	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._mix }
+		return { 'send' : this._fx, 'return' : this._fx }
 	}
 
 	this.delete = function(){
-		const nodes = [ this._fx.input, this._fx.output, this._fx, this._mix, this._mixDry ];
-
-		nodes.forEach((n) => {
-			n.disconnect();
-			n.dispose();
-		});
+		// stop the processor
+		this._fx.workletNode.port.postMessage('dispose');
+		disposeNodes([ this._fx, this._fx.input, this._fx.output ]);
 	}
 }
 
+// Overdrive FX
 // An overdrive/saturation algorithm using the arctan function as a 
 // waveshaping technique. Some mapping to apply a more equal loudness 
 // on the overdrive parameter when increasing the amount
 //
 const Overdrive = function(_params){
-	_params = Util.mapDefaults(_params, [ 2, 1 ]);
-	// apply the default values and convert to arrays where necessary
-	this._drive = Util.toArray(_params[0]);
-	this._wet = Util.toArray(_params[1]);
+	_params = mapDefaults(_params, [ 2, 1 ]);
+	this._drive = _params[0];
+	this._wet = _params[1];
 
-	// The crossfader for wet-dry (originally implemented with CrossFade)
-	// this._mix = new Tone.CrossFade();
-	this._mix = new Tone.Add();
-	this._mixWet = new Tone.Gain(0).connect(this._mix.input);
-	this._mixDry = new Tone.Gain(1).connect(this._mix.addend);	
-
-	// ToneAudioNode has all the tone effect parameters
-	this._fx = new Tone.ToneAudioNode();
-	// A gain node for connecting with input and output
-	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
-	this._fx.output = new Tone.Gain(1).connect(this._mixWet);
-
-	// the fx processor
-	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('arctan-distortion-processor');
-
-	// connect input, fx, output and wetdry
-	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+	// load a worklet FX in a ToneAudioNode
+	this._fx = workletFX('arctan-distortion-processor');
 
 	this.set = function(c, time, bpm){
 		// drive amount, minimum drive of 1
-		const d = Util.assureNum(Math.max(0, Util.getParam(this._drive, c)) + 1);
+		const d = fixNan(Math.max(0, getParam(this._drive, c)) + 1);
+		const wet = clip(getParam(this._wet, c), 0, 1);
 
 		// set the parameters in the workletNode
-		const amount = this._fx.workletNode.parameters.get('amount');
-		amount.setValueAtTime(d, time);
-
-		const wet = Util.clip(Util.getParam(this._wet, c), 0, 1);
-		this._mixWet.gain.setValueAtTime(wet);
-		this._mixDry.gain.setValueAtTime(1 - wet);
+		setParam(this._fx, 'amount', d, time);
+		setParam(this._fx, 'drywet', wet, time);
 	}
 
 	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._mix }
+		return { 'send' : this._fx, 'return' : this._fx }
 	}
 
 	this.delete = function(){
-		disposeNodes([ this._fx, this._fx.input, this._fx.output, this._mix, this._mixDry, this._mixWet ]);
+		this._fx.workletNode.port.postMessage('dispose');
+		disposeNodes([ this._fx, this._fx.input, this._fx.output ]);
 	}
 }
 
+// Fuzz FX
 // A fuzz distortion effect in modelled after the Big Muff Pi pedal 
 // by Electro Harmonics. Using three stages of distortion: 
 // 1 soft-clipping stage, 2 half-wave rectifier, 3 hard-clipping stage
 // 
 const Fuzz = function(_params){
-	_params = Util.mapDefaults(_params, [ 10, 1 ]);
-	// apply the default values and convert to arrays where necessary
-	this._drive = Util.toArray(_params[0]);
-	this._wet = Util.toArray(_params[1]);
+	_params = mapDefaults(_params, [ 10, 1 ]);
+	this._drive = _params[0];
+	this._wet = _params[1];
 
-	// The crossfader for wet-dry (originally implemented with CrossFade)
-	// this._mix = new Tone.CrossFade();
-	this._mix = new Tone.Add();
-	this._mixWet = new Tone.Gain(0).connect(this._mix.input);
-	this._mixDry = new Tone.Gain(1).connect(this._mix.addend);	
-
-	// ToneAudioNode has all the tone effect parameters
-	this._fx = new Tone.ToneAudioNode();
-	// A gain node for connecting with input and output
-	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
-	this._fx.output = new Tone.Gain(1).connect(this._mixWet);
-
-	// the fx processor
-	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('fuzz-processor');
-
-	// connect input, fx, output to wetdry
-	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+	// load a worklet FX in a ToneAudioNode
+	this._fx = workletFX('fuzz-processor');
 
 	this.set = function(c, time, bpm){
 		// drive amount, minimum drive of 1
-		const d = Util.assureNum(Math.max(1, Util.getParam(this._drive, c)) + 1);
+		const d = fixNan(Math.max(1, getParam(this._drive, c)) + 1);
+		const wet = clip(getParam(this._wet, c), 0, 1);
 
 		// set the parameters in the workletNode
-		const amount = this._fx.workletNode.parameters.get('amount');
-		amount.setValueAtTime(d, time);
-
-		const wet = Util.clip(Util.getParam(this._wet, c), 0, 1);
-		this._mixWet.gain.setValueAtTime(wet);
-		this._mixDry.gain.setValueAtTime(1 - wet);
+		setParam(this._fx, 'amount', d, time);
+		setParam(this._fx, 'drywet', wet, time);
 	}
 
 	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._mix }
+		return { 'send' : this._fx, 'return' : this._fx }
 	}
 
 	this.delete = function(){
-		disposeNodes([ this._fx, this._fx.input, this._fx.output, this._mix, this._mixDry, this._mixWet ]);
+		this._fx.workletNode.port.postMessage('dispose');
+		disposeNodes([ this._fx, this._fx.input, this._fx.output ]);
 	}
 }
 
@@ -480,7 +425,7 @@ const Fuzz = function(_params){
 // The technique was described by Trevor Wishart in a lecture.
 // 
 const WaveLoss = function(_params){
-	_params = Util.mapDefaults(_params, [0.5, 1]);
+	_params = mapDefaults(_params, [0.5, 1]);
 	this._amount = _params[0];
 
 	this._fx = workletFX('waveloss-processor');
@@ -500,13 +445,16 @@ const WaveLoss = function(_params){
 	}
 }
 
+// Compressor FX
 // A Compressor effect, allowing to reduce the dynamic range of a signal
 // Set the threshold (in dB's), the ratio, the attack and release time in ms
 // or relative to the tempo
 //
 const Compressor = function(_params){
 	// replace defaults with provided params
-	_params = Util.mapDefaults(_params, [-30, 6, 10, 80]);
+	this.defaults = [-30, 6, 10, 80];
+	this.defaults.splice(0, _params.length, ..._params);
+	_params = this.defaults.map(p => Util.toArray(p));	
 
 	this._fx = new Tone.Compressor({
 		threshold: -24,
@@ -538,6 +486,7 @@ const Compressor = function(_params){
 	}
 }
 
+// Chorus FX
 // A Chorus effect based on the default ToneJS effect
 // Also the Double effect if the wetdry is set to 1 (only wet signal)
 // 
@@ -547,16 +496,16 @@ const Chorus = function(_params){
 
 	this.set = (c, time, bpm) => {
 		// convert division to frequency
-		let f = Util.divToF(Util.getParam(_params[0], c), bpm);
+		let f = divToF(getParam(_params[0], c), bpm);
 		this._fx.frequency.setValueAtTime(f, time);
 		// delaytime/2 because of up and down through center
 		// eg. 25 goes from 0 to 50, 40 goes from 0 to 80, etc.
-		Util.atTime(() => {
-			this._fx.delayTime = Util.getParam(_params[1], c) / 2;
+		atTime(() => {
+			this._fx.delayTime = getParam(_params[1], c) / 2;
 		}, time);
 
 		// waveform for chorus is not supported in browser instead change wetdry
-		let w = Util.getParam(_params[2], c);
+		let w = getParam(_params[2], c);
 		if (isNaN(w)){
 			log(`Wavetype is not supported currently, instead change wet/dry with this argument, defaults to 0.5`);
 			w = 0.5;
@@ -574,74 +523,50 @@ const Chorus = function(_params){
 	}
 }
 
-
+// Squash FX
 // A distortion/compression effect of an incoming signal
 // Based on an algorithm by Peter McCulloch
 // 
 const Squash = function(_params){
-	_params = Util.mapDefaults(_params, [ 4, 1, 0.28 ]);
-	// apply the default values and convert to arrays where necessary
-	this._squash = Util.toArray(_params[0]);
-	this._wet = Util.toArray(_params[1]);
+	_params = mapDefaults(_params, [ 4, 1, 0.28 ]);
+	this._squash = _params[0];
+	this._wet = _params[1];
 
-	// The crossfader for wet-dry (originally implemented with CrossFade)
-	this._mix = new Tone.Add();
-	this._mixDry = new Tone.Gain(0).connect(this._mix.input);
-
-	// ToneAudioNode has all the tone effect parameters
-	this._fx = new Tone.ToneAudioNode();
-	// A gain node for connecting with input and output
-	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
-	this._fx.output = new Tone.Gain(1).connect(this._mix.addend);
-
-	// the fx processor
-	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('squash-processor');
-	// connect input, fx and output
-	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+	this._fx = workletFX('squash-processor');
 
 	this.set = function(c, time, bpm){
-		const d = Util.assureNum(Math.max(1, Util.getParam(this._squash, c)));
+		const d = fixNan(Math.max(1, getParam(this._squash, c)));
 		const m = 1.0 / Math.sqrt(d);
-
-		const amount = this._fx.workletNode.parameters.get('amount');
-		amount.setValueAtTime(d, time);
+		const wet = clip(getParam(this._wet, c));
 		
-		const makeup = this._fx.workletNode.parameters.get('makeup');
-		makeup.setValueAtTime(m, time);
-		
-		const wet = Util.clip(Util.getParam(this._wet, c));
-		this._fx.output.gain.setValueAtTime(m, time);
-		this._mixDry.gain.setValueAtTime(1 - wet, time);
+		setParam(this._fx, 'amount', d, time);
+		setParam(this._fx, 'makeup', m, time);
+		setParam(this._fx, 'drywet', wet, time);
 	}
 
 	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._mix }
+		return { 'send' : this._fx, 'return' : this._fx }
 	}
 
 	this.delete = function(){
-		let nodes = [ this._fx.input, this._fx.output, this._fx, this._mix, this._mixDry ];
-
-		nodes.forEach((n) => {
-			n.disconnect();
-			n.dispose();
-		});
+		this._fx.workletNode.port.postMessage('dispose');
+		disposeNodes([ this._fx, this._fx.input, this._fx.output ]);
 	}
 }
 
 // Reverb FX
 // Add a reverb to the sound to give it a feel of space
-// Using a decaying noise reverb algorithm, that does seem to 
-// increase the memory usage over time slowly
+// Uses the default Tone.Reverb, which uses a decaying noise convolution
+// Seems to leak memory and slowly increases browser RAM over time...
 // 
 const Reverb = function(_params){
-	_params = Util.mapDefaults(_params, [ 0.5, 1.5 ]);
-	this._wet = _params[0];
-	this._size = _params[1];
-
 	this._fx = new Tone.Reverb();
 
+	this._wet = (_params[0] !== undefined)? Util.toArray(_params[0]) : [ 0.5 ];
+	this._size = (_params[1] !== undefined)? Util.toArray(_params[1]) : [ 1.5 ];
+
 	this.set = function(c, time){
-		let tmp = Math.min(15, Math.max(0.1, Util.getParam(this._size, c)));
+		let tmp = Math.min(10, Math.max(0.1, Util.getParam(this._size, c)));
 		if (this._fx.decay != tmp){
 			Util.atTime(() => this._fx.decay = tmp, time);
 		}
@@ -667,74 +592,61 @@ const Reverb = function(_params){
 // https://github.com/khoin/DattorroReverbNode 
 //
 const DattorroReverb = function(_params){
-	_params = Util.mapDefaults(_params, [ 0.5, 10, 0, 0.5 ]);
-	this._gain = Util.toArray(_params[0]);
-	this._size = Util.toArray(_params[1]);
+	_params = mapDefaults(_params, [ 0.5, 10, 0, 0.5 ]);
+	this._gain = toArray(_params[0]);
+	this._size = toArray(_params[1]);
 	// unused currently, but here for compatibility with Mercury4Max code
-	// this._slide = Util.toArray(_params[2]); 
-	this._wet = Util.toArray(_params[3]);
-
-	// The crossfader for wet-dry (originally implemented with CrossFade)
-	this._mix = new Tone.Add();
-	this._mixWet = new Tone.Gain(0).connect(this._mix);
-	this._mixDry = new Tone.Gain(1).connect(this._mix.addend);
+	// this._slide = toArray(_params[2]); 
+	this._wet = toArray(_params[3]);
 
 	// a custom tone audio node with input/output gain and worklet effect
-	this._fx = new Tone.ToneAudioNode();
-	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
-	this._fx.output = new Tone.Gain(1).connect(this._mixWet);
-	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('dattorro-reverb');
-	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+	this._fx = workletFX('dattorro-reverb');
 
 	this.set = (c, time) => {
-		const gn = Math.max(Util.getParam(this._gain, c), 0);
-		const meta = Util.clip(Util.getParam(this._size, c), 0, 20);
-		const wet = Util.clip(Util.getParam(this._wet, c));
+		const gn = Math.max(getParam(this._gain, c), 0);
+		const meta = clip(getParam(this._size, c), 0, 20);
+		const wet = clip(getParam(this._wet, c));
 
-		const dc = Util.remap(meta, 0, 20, 0.01, 0.99, 0.8);
-		const df = Util.remap(meta, 0, 20, 0.2, 0.75, 0.5);
-		const dp = Util.remap(meta, 0, 20, 0.2, 0.65, 2.5);
-		const pd = Util.remap(meta, 0, 20, 700, 100);
+		const dc = remap(meta, 0, 20, 0.01, 0.99, 0.8);
+		const df = remap(meta, 0, 20, 0.2, 0.75, 0.5);
+		const dp = remap(meta, 0, 20, 0.2, 0.65, 2.5);
+		const pd = remap(meta, 0, 20, 700, 100);
 
-		this._fx.workletNode.parameters.get('decay').setValueAtTime(dc, time);
-		this._fx.workletNode.parameters.get('decayDiffusion1').setValueAtTime(df, time);
-		this._fx.workletNode.parameters.get('damping').setValueAtTime(dp, time);
-		this._fx.workletNode.parameters.get('preDelay').setValueAtTime(pd, time);
-
-		this._fx.workletNode.parameters.get('wet').setValueAtTime(gn * 0.7, time);
-		// this._fx.workletNode.parameters.get('dry').setValueAtTime(0.7, time);
-
-		// apply wetdry mix
-		this._mixWet.gain.setValueAtTime(wet, time);
-		this._mixDry.gain.setValueAtTime(1 - wet, time);
+		setParam(this._fx, 'decay', dc, time);
+		setParam(this._fx, 'decayDiffusion1', df, time);
+		setParam(this._fx, 'damping', dp, time);
+		setParam(this._fx, 'preDelay', pd, time);
+		setParam(this._fx, 'gain', gn * 0.7, time);
+		setParam(this._fx, 'drywet', wet, time);
 	}
 
 	this.chain = () => {
-		return { 'send' : this._fx, 'return' : this._mix }
+		return { 'send' : this._fx, 'return' : this._fx }
 	}
 
 	this.delete = () => {
-		disposeNodes([ this._fx, this._mix, this._mixDry, this._mixWet, this._fx.input, this._fx.output ]);
+		this._fx.workletNode.port.postMessage('dispose');
+		disposeNodes([  this._fx.output, this._fx.input, this._fx ]);
 	}
 }
 
 // PitchShift FX
-// Shift the pitch up or down with semitones
+// Shift the pitch up or down in semitones
 // Utilizes the default PitchShift FX from ToneJS
 // 
 const PitchShift = function(_params){
-	_params = Util.mapDefaults(_params, [ -12, 1 ]);
+	_params = mapDefaults(_params, [ -12, 1 ]);
 	// apply the default values and convert to arrays where necessary
-	this._pitch = _params[0];
-	this._wet = _params[1];
+	this._pitch = toArray(_params[0]);
+	this._wet = toArray(_params[1]);
 
 	this._fx = new Tone.PitchShift();
 
 	this.set = function(c, time){
-		let p = Util.getParam(this._pitch, c);
-		let w = Util.getParam(this._wet, c);
+		let p = getParam(this._pitch, c);
+		let w = getParam(this._wet, c);
 
-		Util.atTime(() => this._fx.pitch = TL.toScale(p), time);
+		atTime(() => this._fx.pitch = TL.toScale(p), time);
 		this._fx.wet.setValueAtTime(w, time);
 	}
 
@@ -750,6 +662,7 @@ const PitchShift = function(_params){
 
 // LFO FX
 // a Low Frequency Oscillator effect, control tempo, type and depth
+// Using Tone.LFO with some specific mappings to fix phase issues
 //
 const LFO = function(_params){
 	_params = Util.mapDefaults(_params, [ '1/8', 'sine', 1 ]);
@@ -838,146 +751,203 @@ const LFO = function(_params){
 	}
 }
 
+// State Variable Filter FX
+// A new filter using the State Variable Filter implementation from Hal 
+// Chamberlin. The improved version, based on the paper:
+// "Improving the Digital Chamberlin State Variable Filter"
+// Updated version based on the paper https://arxiv.org/pdf/2111.05592
+// by Victor Lazzarini and Joseph Timoney, 2022
+// ported to gen~ and later JS by Timo Hoogland, 2026
+// Other useful resource on SVF: 
+// https://www.earlevel.com/main/2003/03/02/the-digital-state-variable-filter/
+//
+const SVF = function(_params){
+	_params = toArray(_params);
+	if (_params.length < 3 && _params.length){
+		if (typeof _params[0][0] !== 'string'){
+			_params = [['low']].concat(_params);
+		}
+	}
+	_params = mapDefaults(_params, ['lowpass', 1200, 0.45]);
+
+	this._type = _params[0];
+	this._freq = _params[1];
+	this._res = _params[2];
+
+	this._fx = workletFX('state-variable-filter');
+
+	this.set = function(c, time, bpm){
+		let tp = filtertypeIndex(checkFiltertype(getParam(this._type, c)));
+		setParam(this._fx, 'type', tp, time);
+
+		let fq = clip(fixNan(getParam(this._freq, c), 1000), 5, 18000);
+		setParam(this._fx, 'frequency', fq, time);
+
+		let rs = clip(fixNan(getParam(this._res, c), 0.8), 0.01, 0.95);
+		setParam(this._fx, 'resonance', rs, time);
+	}
+
+	this.chain = function(){
+		return { 'send' : this._fx, 'return' : this._fx };
+	}
+
+	this.delete = function(){
+		this._fx.disposeWorklet();
+		disposeNodes([ this._fx ]);
+	}
+}
+
+// State Variable Filter with LFO modulation option
+// Based on improved Hal Chamberlin SVF, see SVF above for more references
+// 
+const AutoSVF = function(_params){
+	_params = mapDefaults(_params, [ 'low', '1/1', 200, 3000, 0.45, 'sine', 0.5 ]);
+	this._fx = workletFX('state-variable-filter');
+	
+	// generate an LFO to modulate the cutoff-frequency of the filter
+	this._lfo = new Tone.LFO();
+	this._scale = new Tone.ScaleExp();
+	
+	// connect the LFO to the frequency param of the worklet processor
+	this._freqParam = this._fx.workletNode.parameters.get('frequency');
+	this._lfo.chain(this._scale, this._freqParam);
+
+	this.set = (c, time, bpm) => {
+		let tp = filtertypeIndex(checkFiltertype(getParam(_params[0], c)));
+		setParam(this._fx, 'type', tp, time);
+
+		let t = divToS(getParam(_params[1], c), bpm);
+		let f = 1 / t;
+		this._lfo.frequency.setValueAtTime(f, time);
+
+		let lo = clip(getParam(_params[2], c), 5, 18000);
+		let hi = clip(getParam(_params[3], c), 5, 18000);
+		let exp = clip(getParam(_params[6], c), 0.001, 100);
+		let res = clip(getParam(_params[4], c), 0.001, 0.95);
+		
+		let w = getParam(_params[5], c);
+		if (!isNaN(w)){
+			switch(Math.floor(clip(w, 0, 1)*2.99)){
+				case 0: 
+					// regular saw up
+					w = 'sawtooth'; break;
+				case 1:
+					w = 'sine'; break;
+				case 2:
+					// swap hi/lo range for saw down effect, invert exponent
+					w = 'sawtooth';
+					let tmp = lo; lo = hi; hi = tmp; 
+					exp = 1 / exp;
+					break;
+			}
+		}
+		w = assertLfoWave(w);
+		atTime(() => { this._lfo.set({ type: w }) }, time);
+
+		atTime(() => { this._scale.min = lo }, time);
+		atTime(() => { this._scale.max = hi }, time);
+		atTime(() => { this._scale.exponent = exp }, time);
+		
+		setParam(this._fx, 'resonance', res, time);
+
+		if (this._lfo.state !== 'started'){
+			time += lfoTimeCorrection(w, t);
+			this._lfo.start(time);
+		}
+	}
+
+	this.chain = () => {
+		return { 'send' : this._fx, 'return' : this._fx };
+	}
+
+	this.delete = () => {
+		this._fx.disposeWorklet();
+		disposeNodes([ this._fx ])
+	}
+}
+
+// Filter FX
 // A filter FX, choose between highpass, lowpass and bandpass
 // Set the cutoff frequency and Q factor
 // Optionally with extra arguments you can apply a modulation
 //
 const Filter = function(_params){
-	// parameter mapping changes based on amount of arguments
+// parameter mapping changes based on amount of arguments
 	this._static = true;
 	if (_params.length < 4){
 		if (typeof _params[0] === 'string'){
-			_params = Util.mapDefaults(_params, ['low', 1200, 0.45]);
+			_params = mapDefaults(_params, ['low', 1200, 0.45]);
 		} else {
-			_params = [['low']].concat(Util.mapDefaults(_params, [1200, 0.45]));
+			_params = [['low']].concat(mapDefaults(_params, [1200, 0.45]));
 		}
 	}
 	else {
-		_params = Util.mapDefaults(_params, ['low', '1/1', 200, 3000, 0.45, 'sine', 0.5]);
+		_params = mapDefaults(_params, ['low', '1/1', 200, 3000, 0.45, 'sine', 0.5]);
 		this._static = false;
 	}
 
-	this._fx = new Tone.Filter();
+	this._fx = new Tone.Filter({ rolloff: -24 });
 
 	// the following is only used if the parameters for modulation
 	// are added as arguments to the fx(filter) function
 	if (!this._static){
 		this._lfo = new Tone.LFO();
 		this._scale = new Tone.ScaleExp();
-		this._lfo.connect(this._scale);
-		this._scale.connect(this._fx.frequency);
+		this._lfo.chain(this._scale, this._fx.frequency);
 	}
-
 	// available filter types for the filter
-	this._types = {
-		'lo' : 'lowpass',
-		'low' : 'lowpass',
-		'lowpass' : 'lowpass',
-		'hi' : 'highpass',
-		'high' : 'highpass',
-		'highpass' : 'highpass',
-		'band' : 'bandpass',
-		'bandpass': 'bandpass',
-	}
-	if (this._types[_params[0]]){
-		this._fx.set({ type: this._types[_params[0]] });
-	} else {
-		console.log(`'${_params[0]}' is not a valid filter type. Defaults to lowpass`);
-		this._fx.set({ type: 'lowpass' });
-	}
-	this._fx.set({ rolloff: -24 });
-
-	// available waveforms for the LFO
-	this._waveMap = {
-		sine : 'sine',
-		// sineUp : 'sine',
-		// sineDown : 'sine',
-		saw : 'sawtooth',
-		sawUp: 'sawtooth',
-		sawDown: 'sawtooth',
-		up: 'sawtooth',
-		down: 'sawtooth',
-		// square : 'square',
-		// squareUp : 'square',
-		// squareDown : 'square',
-		// rect : 'square',
-		triangle : 'triangle',
-		tri : 'triangle',
-	}
+	this._fx.set({ type: checkFiltertype(_params[0]) });
 
 	this.set = function(c, time, bpm){
 		let _q;
 		// if the filter is static use the settings of frequency and resonance 
 		if (this._static){
-			let f = Util.getParam(_params[1], c);
 			_q = _params[2];
-
+			
+			let f = getParam(_params[1], c);
 			this._fx.frequency.setValueAtTime(f, time);
-			// let rt = Util.divToS(Util.getParam(this._rt, c), bpm);
 		} else {
 			_q = _params[4];
-			let t = Util.divToS(Util.getParam(_params[1], c), bpm);
+			
+			let t = divToS(getParam(_params[1], c), bpm);
 			let f = 1 / t;
-			let lo = Util.clip(Util.getParam(_params[2], c), 5, 19000);
-			let hi = Util.clip(Util.getParam(_params[3], c), 5, 19000);
+			this._lfo.frequency.setValueAtTime(f, time);
+			
+			let lo = clip(getParam(_params[2], c), 5, 19000);
+			let hi = clip(getParam(_params[3], c), 5, 19000);
+			let exp = clip(getParam(_params[6], c), 0.001, 100);
 
-			let w = Util.getParam(_params[5], c);
-			if (this._waveMap[w]){
-				w = this._waveMap[w];
-			} else {
-				if (isNaN(w)){
-					log(`${w} is not a valid waveshape. Defaults to sine`);
-					// default wave if wave does not exist
-					w = 'sine';
-				} else {
-					// w = value between 0 and 1, map to up, down, triangle 
-					// 0=down, 0.5=triangle, 1=up
-					switch(Math.floor(Util.clip(w, 0, 1)*2.99)){
-						case 0: 
-							// regular saw up
-							w = 'sawtooth'; break;
-						case 1:
-							w = 'sine'; break;
-						case 2:
-							w = 'sawtooth';
-							// swap hi/lo range for saw down effect
-							let tmp = lo; lo = hi; hi = tmp; break;
-					}
+			let w = getParam(_params[5], c);
+			if (!isNaN(w)){
+				switch(Math.floor(clip(w, 0, 1)*2.99)){
+					case 0: 
+						// regular saw up
+						w = 'sawtooth'; break;
+					case 1:
+						w = 'sine'; break;
+					case 2:
+						// swap hi/lo range for saw down effect, invert exponent
+						w = 'sawtooth';
+						let tmp = lo; lo = hi; hi = tmp; 
+						exp = 1 / exp;
+						break;
 				}
 			}
-			this._lfo.set({ type: w });
+			w = assertLfoWave(w);
+			atTime(() => { this._lfo.set({ type: w }) }, time);
 
-			let exp = Util.clip(Util.getParam(_params[6], c), 0.01, 100);
+			atTime(() => { this._scale.min = lo }, time);
+			atTime(() => { this._scale.max = hi }, time);
+			atTime(() => { this._scale.exponent = exp }, time);
 
-			this._scale.min = lo;
-			this._scale.max = hi;
-			this._scale.exponent = exp;
-			this._lfo.frequency.setValueAtTime(f, time);
-
-			this._lfo.max = 1;
-
-			if (this._lfo.state !== 'started'){
-				switch (w) {
-					case 'sine' :
-						time += t * 0.25; break;
-					case 'triangle' :
-						time += t * 0.25; break;
-					case 'sawtooth' :
-						time += t * 0.5; break;
-				}	
+			if (this._lfo.state !== 'started'){	
+				time += lfoTimeCorrection(w, t);
 				this._lfo.start(time);
 			}
 		}
 
-		let r = 1 / (1 - Math.min(0.95, Math.max(0, Util.getParam(_q, c))));
+		let r = 1 / (1 - Math.min(0.95, Math.max(0, getParam(_q, c))));
 		this._fx.Q.setValueAtTime(r, time);
-
-		// ramptime removed now that modulation is possible
-		// if (rt > 0){
-		// 	this._fx.frequency.rampTo(f, rt, time);
-		// } else {
-		// 	this._fx.frequency.setValueAtTime(f, time);
-		// }
 	}
 
 	this.chain = function(){
@@ -985,86 +955,69 @@ const Filter = function(_params){
 	}
 
 	this.delete = function(){
-		let nodes = [ this._fx, this._lfo, this._scale ];
-
-		nodes.forEach((n) => {
-			n?.disconnect();
-			n?.dispose();
-		});
+		disposeNodes([ this._fx, this._lfo, this._scale ]);
 	}
 }
 
-// A automated filter (filter with envelope) that is triggered by the note
-// Set the filter type (lowpass, highpass, bandpass)
-// Set the attack and release time
-// Set the low and high filter range
-// Set the curve mode
+// TriggerFilter FX
+// A automated filter (filter with envelope) that is triggered by the sequencer.
+// Uses the updated Hal Chamberlin State Variable Filter in a worklet processor.
+// Set the filter type (lowpass, highpass, bandpass). Set the attack and 
+// release time. Set the low and high filter range. Set the curve mode
 //
 const TriggerFilter = function(_params){
-	this._fx = new Tone.Filter(1000, 'lowpass', -24);
-	this._adsr = new Tone.Envelope({
-		attackCurve: "linear",
-		decayCurve: "linear",
-		sustain: 0,
-		release: 0.001
-	});
+	this._fx = workletFX('state-variable-filter');
+	this._env = new Tone.Signal(0);
 	this._mul = new Tone.Multiply();
 	this._add = new Tone.Add();
-	this._pow = new Tone.Pow(3);
+	this._pow = new Tone.Pow(2);
 
-	this._adsr.connect(this._pow.connect(this._mul));
+	this._env.connect(this._pow);
+	this._pow.connect(this._mul);
 	this._mul.connect(this._add);
-	this._add.connect(this._fx.frequency);
 
-	this._types = {
-		'lo' : 'lowpass',
-		'low' : 'lowpass',
-		'lowpass' : 'lowpass',
-		'hi' : 'highpass',
-		'high' : 'highpass',
-		'highpass' : 'highpass',
-		'band' : 'bandpass',
-		'bandpass': 'bandpass'
-	}
+	// connect envelope to frequency parameter from workletnode
+	this._freqParam = this._fx.workletNode.parameters.get('frequency');
+	this._add.connect(this._freqParam);
 
 	// replace defaults with provided arguments
-	_params = Util.mapDefaults(_params, ['low', 1, '1/16', 4000, 100, 1]);
-	// this.defaults.splice(0, _params.length, ..._params);
-	_params = _params.map(p => Util.toArray(p));
+	_params = Util.mapDefaults(_params, ['low', 1, '1/16', 4000, 100, 0.5]);
 
-	if (this._types[_params[0][0]]){
-		this._fx.set({ type: this._types[_params[0][0]] });
-	} else {
-		Util.log(`'${_params[0][0]}' is not a valid filter type. Defaulting to lowpass`);
-		this._fx.set({ type: 'lowpass' });
-	}
+	// default resonance for the filter
+	setParam(this._fx, 'resonance', 0.3);
 
+	this._type = _params[0];
 	this._att = _params[1];
 	this._rel = _params[2];
-	this._high = _params[3];
-	this._low = _params[4];
+	this._max = _params[3];
+	this._min = _params[4];
 	this._exp = _params[5];
 
 	this.set = function(c, time, bpm){
-		this._adsr.attack = Util.divToS(Util.getParam(this._att, c), bpm);
-		this._adsr.decay = Util.divToS(Util.getParam(this._rel, c), bpm);
+		let tp = filtertypeIndex(checkFiltertype(getParam(this._type, c)));
+		setParam(this._fx, 'type', tp, time);
 
-		let min = Util.getParam(this._low, c);
-		let max = Util.getParam(this._high, c);
+		let att = divToS(getParam(this._att, c), bpm);
+		let rel = divToS(getParam(this._rel, c), bpm);
+		let max = Util.getParam(this._max, c);
+		let min = Util.getParam(this._min, c);
 		let range = Math.abs(max - min);
 		let lower = Math.min(max, min);
 		let exp = 1 / Util.getParam(this._exp, c);
 
 		this._mul.setValueAtTime(range, time);
 		this._add.setValueAtTime(lower, time);
-		Util.atTime(() => { this._pow.value = exp }, time);
+		atTime(() => { this._pow.value = exp }, time);
 
-		// fade-out running envelope over 5 ms
-		if (this._adsr.value > 0){
-			this._adsr.triggerRelease(time);
-			time += this._adsr.release;
+		// retrigger fade-out envelope over 2 ms
+		let retrigger = 0;
+		if (this._env.getValueAtTime(time) > 0.01){
+			this._env.rampTo(0.0, 0.002, time);
+			retrigger = 0.003;
 		}
-		this._adsr.triggerAttack(time, 1);
+		// trigger attack and release part of the envelope for filter modulation
+		this._env.rampTo(1, att, time + retrigger);
+		this._env.rampTo(0, rel, time + att + retrigger);
 	}
 
 	this.chain = function(){
@@ -1072,225 +1025,57 @@ const TriggerFilter = function(_params){
 	}
 
 	this.delete = function(){
-		let nodes = [ this._fx, this._adsr, this._mul, this._add, this._pow ];
-
-		nodes.forEach((b) => {
-			b.disconnect();
-			b.dispose();
-		});
+		this._fx.disposeWorklet();
+		disposeNodes([ this._fx, this._env, this._mul, this._add, this._pow ]);
 	}
 }
 
-/*const AutoFilter = function(_params){
-	console.log('FX => AutoFilter()', _params);
-
-	this._fx = new Tone.AutoFilter('8n', 100, 4000);
-
-	this.set = function(c, time, bpm){
-
-	}
-
-	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._fx }
-	}
-
-	this.delete = function(){
-		this._fx.disconnect();
-		this._fx.dispose();
-	}
-}*/
-
-// Custom stereo delay implementation with lowpass filter in feedback loop
-const Delay = function(_params){
-	// apply the default values and convert to arrays where necessary
+// Delay FX
+// A new ping-pong delay implementation using a custom AudioWorkletProcessor. 
+// The custom processor allows for shorter delaytimes, and less overhead since 
+// everything runs inside one Tone AudioNode instead of using multiple 
+// Web Audio Nodes. The delay includes a lowpass filter in the feedback 
+// loop and delaytimes are set for the left and right channel independently, 
+// but channels are cross-mixed. The feedbackloop also includes a 10Hz highpass 
+// filter to remove DC-offset and reduce energy build-up in the low-frequency 
+// range with high feedback amounts.
+//
+const WorkletDelay = function(_params) {
+	// if only 1 param, apply time to both Left and Right
 	if (_params.length === 1){ _params[1] = _params[0] }
+	// if only 2 params, apply time to Left and Right, and second value feedback
 	else if (_params.length === 2){
 		_params[2] = _params[1];
 		_params[1] = _params[0];
 	}
+	// param order: timeLeft, timeRight, feedback, damping, drywet
+	_params = mapDefaults(_params, [ '2/16', '3/16', 0.8, 0.4, 0.5 ]);
 
-	_params = Util.mapDefaults(_params, [ '3/16', '2/8', 0.7, 0.6, 0.5 ]);
-	this._timeL = Util.toArray(_params[0]);
-	this._timeR = Util.toArray(_params[1]);
-	this._feedBack = Util.toArray(_params[2]);
-	this._fbDamp = Util.toArray(_params[3]);
-	this._wet = Util.toArray(_params[4]);
+	this._maxTime = 5000;
+	// load a worklet FX in a ToneAudioNode
+	this._fx = workletFX('stereo-delay');
 
-	this._fx = new Tone.Gain(1);
-	this._fb = new Tone.Gain(0.5);
-	this._mix = new Tone.CrossFade(0.5);
-	this._split = new Tone.Split(2);
-	this._merge = new Tone.Merge(2);
-	this._maxDelay = 3;
+	this.set = (c, time, bpm) => {
+		const dL = clip(divToS(getParam(_params[0], c), bpm) * 1000, 0, this._maxTime);
+		const dR = clip(divToS(getParam(_params[1], c), bpm) * 1000, 0, this._maxTime);
+		const fb = clip(fractToFloat(getParam(_params[2], c), 0, 2));
+		const dm = clip(getParam(_params[3], c), 0.01, 0.99);
+		const dw = clip(getParam(_params[4], c));
 
-	this._delayL = new Tone.Delay({ maxDelay: this._maxDelay });
-	this._delayR = new Tone.Delay({ maxDelay: this._maxDelay });
-	this._flt = new Tone.Filter(1000, 'lowpass', '-12');
-
-	// split the signal
-	this._fx.connect(this._mix.a);
-	this._fx.connect(this._fb);
-
-	this._fb.connect(this._split);
-	// the feedback node connects to the delay L + R
-	this._split.connect(this._delayL, 0, 0);
-	this._split.connect(this._delayR, 1, 0);
-	// merge back
-	this._delayL.connect(this._merge, 0, 0);
-	this._delayR.connect(this._merge, 0, 1);
-	// the delay is the input chained to the sample and returned
-	// the delay also connects to the onepole filter
-	this._merge.connect(this._flt);
-	// the output of the onepole is stored back in the gain for feedback
-	this._flt.connect(this._fb);
-	// connect the feedback also to the crossfade mix
-	this._fb.connect(this._mix.b);
-
-	this.set = function(c, time, bpm){
-		let dL = Math.min(this._maxDelay, Math.max(0, Util.formatRatio(Util.getParam(this._timeL, c), bpm)));
-		let dR = Math.min(this._maxDelay, Math.max(0, Util.formatRatio(Util.getParam(this._timeR, c), bpm)));
-		let fb = Math.max(0, Math.min(0.99, Util.getParam(this._feedBack, c) * 0.707));
-		let cf = Math.max(10, Util.getParam(this._fbDamp, c) * 8000);
-
-		this._delayL.delayTime.setValueAtTime(dL + Math.random() * 0.001, time);		
-		this._delayR.delayTime.setValueAtTime(dR + Math.random() * 0.001, time);
-		this._fb.gain.setValueAtTime(Util.assureNum(fb, 0.7), time);
-		this._flt.frequency.setValueAtTime(cf, time);
-
-		const wet = Util.clip(Util.getParam(this._wet, c));
-		this._mix.fade.setValueAtTime(wet, time);
+		// set parameters for workletprocessor
+		setParam(this._fx, 'timeL', dL, time);
+		setParam(this._fx, 'timeR', dR, time);
+		setParam(this._fx, 'feedback', fixNonFinite(fb, 0.5), time);
+		setParam(this._fx, 'damping', fixNonFinite(dm, 0.5), time);
+		setParam(this._fx, 'drywet', fixNonFinite(dw, 0.5), time);
 	}
 
-	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._mix };
+	this.chain = () => {
+		return { 'send' : this._fx, 'return' : this._fx }
 	}
 
-	this.delete = function(){
-		let nodes = [ this._fx, this._fb, this._mix, this._split, this._merge, this._delayL, this._delayR, this._flt ];
-
-		nodes.forEach((b) => {
-			b.disconnect();
-			b.dispose();
-		});
+	this.delete = () => {
+		this._fx.disposeWorklet();
+		disposeNodes([ this._fx ]);
 	}
 }
-
-// Old pingpong delay implementation, just using the Tone.PingPongDelay()
-// const PingPongDelay = function(_params){
-// 	this._fx = new Tone.PingPongDelay();
-// 	this._fx.set({ wet: 0.4 });
-
-// 	// console.log('delay', param);
-// 	this._dTime = (_params[0] !== undefined)? Util.toArray(_params[0]) : [ '3/16' ];
-// 	this._fb = (_params[1] !== undefined)? Util.toArray(_params[1]) : [ 0.3 ];
-// 	// let del = new Tone.PingPongDelay(formatRatio(t), fb);
-
-// 	this.set = function(c, time, bpm){
-// 		let t = Math.max(0, Util.formatRatio(Util.getParam(this._dTime, c), bpm));
-// 		let fb = Math.max(0, Math.min(0.99, Util.getParam(this._fb, c)));
-
-// 		this._fx.delayTime.setValueAtTime(t, time);
-// 		this._fx.feedback.setValueAtTime(fb, time);
-// 	}
-
-// 	this.chain = function(){
-// 		return { 'send' : this._fx, 'return' : this._fx };
-// 	}
-
-// 	this.delete = function(){
-// 		this._fx.disconnect();
-// 		this._fx.dispose();
-// 	}
-// }
-
-// const FreeVerb = function(_params){
-// 	this._fx = new Tone.Freeverb(_params[0], _params[1]);
-
-// 	this.set = function(c, time, bpm){
-
-// 	}
-
-// 	this.chain = function(){
-// 		return { 'send' : this._fx, 'return' : this._fx };
-// 	}
-
-// 	this.delete = function(){
-// 		let nodes = [ this._fx ];
-
-// 		nodes.forEach((b) => {
-// 			b.disconnect();
-// 			b.dispose();
-// 		});
-// 	}
-// }
-
-// squash/compress an incoming signal
-// based on algorithm by Peter McCulloch
-// const SquashDeprecated = function(_params){
-// 	this._compress = (_params[0] !== undefined)? Util.toArray(_params[0]) : [1];
-
-// 	this._fx = new Tone.WaveShaper();
-
-// 	this.shaper = function(amount){
-// 		// (a * c) / ((a * c)^2 * 0.28 + 1) / √c
-// 		// drive amount, minimum of 1
-// 		const c = amount;
-// 		// makeup gain
-// 		const m = 1.0 / Math.sqrt(c);
-// 		// set the waveshaper effect
-// 		this._fx.setMap((x) => {
-// 			return (x * c) / ((x * c) * (x * c) * 0.28 + 1) * m; 
-// 		});
-// 	}
-	
-// 	this.set = function(c){
-// 		let d = Util.getParam(this._compress, c);
-// 		this.shaper(isNaN(d)? 1 : Math.max(1, d));
-// 	}
-
-// 	this.chain = function(){
-// 		return { 'send' : this._fx, 'return' : this._fx };
-// 	}
-
-// 	this.delete = function(){
-// 		this._fx.disconnect();
-// 		this._fx.dispose();
-// 	}
-// }
-
-// A distortion algorithm using the tanh (hyperbolic-tangent) as a 
-// waveshaping technique. Some mapping to apply a more equal loudness 
-// distortion is applied on the overdrive parameter
-//
-// const DriveDeprecated = function(_params){
-// 	this._drive = (_params[0] !== undefined)? Util.toArray(_params[0]) : [1.5];
-
-// 	this._fx = new Tone.WaveShaper();
-
-// 	this.shaper = function(amount){
-// 		// drive curve, minimum drive of 1
-// 		const d = Math.pow(amount, 2);
-// 		// makeup gain
-// 		const m = Math.pow(d, 0.6);
-// 		// preamp gain reduction for linear at drive = 1
-// 		const p = 0.4;
-// 		// set the waveshaping effect
-// 		this._fx.setMap((x) => {
-// 			return Math.tanh(x * p * d) / p / m;
-// 		});
-// 	}
-	
-// 	this.set = function(c){
-// 		let d = Util.getParam(this._drive, c);
-// 		this.shaper(isNaN(d)? 1 : Math.max(1, d));
-// 	}
-
-// 	this.chain = function(){
-// 		return { 'send' : this._fx, 'return' : this._fx };
-// 	}
-
-// 	this.delete = function(){
-// 		this._fx.disconnect();
-// 		this._fx.dispose();
-// 	}
-// }
