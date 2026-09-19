@@ -1,6 +1,11 @@
 const Tone = require('tone');
-const Util = require('./Util.js');
 const TL = require('total-serialism').Translate;
+const Util = require('./Util.js');
+const { getParam, mapDefaults, toArray, atTime } = require('./Util.js');
+const { clip, divToS, fractToFloat } = require('./Util.js');
+const { fixNan, fixNonFinite } = require('./Util.js');
+const { checkFiltertype, filtertypeIndex } = require('./Util.js');
+const { assertLfoWave, lfoTimeCorrection } = require('./Util.js');
 
 // all the available effects
 const fxMap = {
@@ -111,13 +116,44 @@ const fxMap = {
 	},
 	'speak' : (params) => {
 		return new FormantFilter(params);
+	},
+	'loss' : (params) => {
+		return new WaveLoss(params);
+	},
+	'waveloss' : (params) => {
+		return new WaveLoss(params);
 	}
 }
 module.exports = fxMap;
 
+const workletFX = function(fx){
+	// ToneAudioNode has all the tone effect parameters
+	const _fx = new Tone.ToneAudioNode();
+	// A gain node for connecting with input and output
+	_fx.input = new Tone.Gain(1);
+	_fx.output = new Tone.Gain(1);
+	// the fx processor
+	_fx.workletNode = new Tone.getContext().createAudioWorkletNode(fx);
+	// connect input, fx and output
+	_fx.input.chain(_fx.workletNode, _fx.output);
+	// create a dispose function
+	_fx.disposeWorklet = () => { 
+		_fx.workletNode.port.postMessage('dispose');
+	}
+	// send a reference back
+	return _fx;
+}
+
+// Helper functions
+
+// Set a parameter in an worklet processor
+const setParam = function(node, param, value, time) {
+	const p = node.workletNode.parameters.get(param);
+	p.setValueAtTime(value, time ?? Tone.now());
+}
+
 // Dispose a array of nodes
-//
-function disposeNodes(nodes=[]) {
+const disposeNodes = function(nodes=[]) {
 	nodes.forEach((n) => {
 		n?.disconnect();
 		n?.dispose();
@@ -433,6 +469,34 @@ const Fuzz = function(_params){
 
 	this.delete = function(){
 		disposeNodes([ this._fx, this._fx.input, this._fx.output, this._mix, this._mixDry, this._mixWet ]);
+	}
+}
+
+// Waveloss FX
+// The waveloss effect gradually drops sound (reduces it to 0) between detected
+// zero-crossings in the signal. This is based on a probability. The amount
+// increases the probability that the signal will be dropped.
+// Inspired by Supercollider waveloss function. 
+// The technique was described by Trevor Wishart in a lecture.
+// 
+const WaveLoss = function(_params){
+	_params = Util.mapDefaults(_params, [0.5, 1]);
+	this._amount = _params[0];
+
+	this._fx = workletFX('waveloss-processor');
+
+	this.set = (count, time, bpm) => {
+		const a = clip(fixNonFinite(getParam(this._amount, count)));
+		setParam(this._fx, 'amount', a, time);
+	}
+
+	this.chain = () => { 
+		return { 'send' : this._fx, 'return' : this._fx } 
+	}
+
+	this.delete = () => {
+		this._fx.disposeWorklet();
+		disposeNodes([ this._fx ]);
 	}
 }
 
