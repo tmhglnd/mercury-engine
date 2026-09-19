@@ -380,13 +380,12 @@ registerProcessor('downsampler-processor', DownSampleProcessor);
 // waveshaping technique. Some mapping to apply a more equal loudness 
 // distortion is applied on the overdrive parameter
 //
-class ArctanDistortionProcessor extends AudioWorkletProcessor {
+class ArctanDistortionProcessor extends ExtendedWorkletProcessor {
 	static get parameterDescriptors(){
-		return [{
-			name: 'amount',
-			defaultValue: 5,
-			minValue: 1
-		}]
+		return formatDescriptors([
+			[ 'amount', 5, 1, MAX_DEF, 'a-rate' ],
+			[ 'drywet', 1, 0, 1, 'a-rate' ]
+		]);
 	}
 
 	constructor(){
@@ -404,14 +403,17 @@ class ArctanDistortionProcessor extends AudioWorkletProcessor {
 		const gain = parameters.amount[0];
 		const makeup = Math.min(1, Math.max(0, 1 - ((Math.atan(gain) - this.Q_PI) * this.INVQ_PI * 0.823)));
 
+		const dw = parameters.drywet[0];
+
 		if (input.length > 0){
 			for (let channel=0; channel<input.length; channel++){
 				for (let i=0; i<input[channel].length; i++){
-					output[channel][i] = Math.atan(input[channel][i] * gain) * makeup;
+					const out = Math.atan(input[channel][i] * gain) * makeup;
+					output[channel][i] = mix(input[channel][i], out, dw);
 				}
 			}
 		}
-		return true;
+		return this.running;
 	}
 }
 registerProcessor('arctan-distortion-processor', ArctanDistortionProcessor);
