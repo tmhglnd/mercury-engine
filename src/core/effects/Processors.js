@@ -329,14 +329,12 @@ registerProcessor('fm-processor', FMProcessor);
 // Resulting in a lower samplerate, making it sound more like 8bit/chiptune
 // Programmed with a custom AudioWorkletProcessor, see effects/Processors.js
 //
-class DownSampleProcessor extends AudioWorkletProcessor {
+class DownSampleProcessor extends ExtendedWorkletProcessor {
 	static get parameterDescriptors() {
-		return [{
-			name: 'down',
-			defaultValue: 8,
-			minValue: 1,
-			maxValue: 2048
-		}];
+		return formatDescriptors([
+			[ 'down', 8, 1, 2048, 'a-rate' ],
+			[ 'drywet', 1, 0, 1, 'a-rate' ]
+		]);
 	}
 
 	constructor(){
@@ -355,7 +353,9 @@ class DownSampleProcessor extends AudioWorkletProcessor {
 		if (input.length > 0){
 			// for the length of the sample array (generally 128)
 			for (let i=0; i<input[0].length; i++){
-				const d = (parameters.down.length > 1) ? parameters.down[i] : parameters.down[0];
+				const d = parameters.down[i] ?? parameters.down[0];
+				const dw = parameters.drywet[i] ?? parameters.drywet[0];
+				
 				// for every channel
 				for (let channel=0; channel<input.length; ++channel){
 					// if counter equals 0, sample and hold
@@ -363,13 +363,15 @@ class DownSampleProcessor extends AudioWorkletProcessor {
 						this.sah[channel] = input[channel][i];
 					}
 					// output the currently held sample
-					output[channel][i] = this.sah[channel];
+					// apply drywet param
+					const out = this.sah[channel];
+					output[channel][i] = mix(input[channel][i], out, dw);
 				}
 				// increment sample counter
 				this.count++;
 			}
 		}
-		return true;
+		return this.running;
 	}
 }
 registerProcessor('downsampler-processor', DownSampleProcessor);
