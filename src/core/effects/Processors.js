@@ -1,20 +1,164 @@
 
+// Constants for calculations
+const MAX_DEF = +340282346638528859811704183484516925440;
+const MIN_DEF = -340282346638528859811704183484516925440;
+
+// Some helper functions
+const PI = Math.PI;
+const TWOPI = Math.PI * 2.0;
+const SR = sampleRate;
+const INV_SR = 1 / sampleRate;
+const BLOCKSIZE = 128;
+
+// Wrap the phase between 0 and 1
+function phaseWrap(phase){
+	if (phase >= 1.0){
+		phase -= 1.0;
+	} else if (phase < 0.0){
+		phase += 1.0;
+	}
+	return phase;
+}
+
+// Some helper functions
+// Mix two signals with linear interpolation
+const mix = (a=0, b=0, x=0.5) => a + ((b - a) * x);
+// function to retrieve a parameter value from array if any exists
+const pv = (param, i) => param[i] ?? param[0];
+// get the sign of the signal -1/1
+const sign = (sig) => sig < 0 ? -1 : 1;
+// truncate the signal (removing fractional component)
+const trunc = (sig) => sig | 0;
+// return the fractional component of a signal
+const fract = (sig) => sig - trunc(sig);
+// fix Not a Number
+const fixnan = (sig) => isNaN(sig) ? 0 : sig;
+// Mix two signals with equal power gain
+const equalPowerMix = (a=0, b=0, x=0.5) => {
+	return a * Math.cos(x * 0.5 * PI) + b * Math.cos((x * 0.5 - 0.5) * PI);
+}
+
+// Format descriptors and return to output
+function formatDescriptors(descriptors=[]){
+	return descriptors.map(x => new Object({
+		name: x[0],
+		defaultValue: x[1],
+		minValue: x[2],
+		maxValue: x[3],
+		automationRate: x[4]
+	}));
+}
+
+// The extended worklet processor contains a few base functionalities
+// for all the other processors to be used.
+// 
+class ExtendedWorkletProcessor extends AudioWorkletProcessor {
+	constructor(options){
+		super(options);
+		// is the processor running? use as return in process()
+		this.running = true;
+		this.port.onmessage = (e) => {
+			// dispose on node.port.postMessage('dispose')
+			if (e.data === 'dispose'){ 
+				this.running = false; 
+				// console.log('disposed workletprocessor', this);
+			}
+		}
+	}
+	// Template for parent class processing, overwrite this in the parent class
+	// process(inputs, outputs, parameters){
+	// 	const input = inputs[0];
+	// 	const output = outputs[0];
+	
+	// 	if (input.length > 0){
+	// 		// for every channel
+	// 		for (let channel = 0; channel < input.length; channel++){
+	// 			// for the length of the sample array (generally 128)
+	// 			for (let i = 0; i < input[0].length; i++){
+	// 				output[channel][i] = input[channel][i];
+	// 			}
+	// 		}
+	// 	}
+	// 	return this.running;
+	// }
+}
+
+// The DelayWorkletProcessor is a baseclass that includes various functions for
+// generating a delayline within an audioworklet.
+// 
+class DelayWorkletProcessor extends ExtendedWorkletProcessor {
+	constructor(options){
+		super(options);
+	}
+	// initialize a delayline with maximum size in milliseconds
+	// makeDelay code based on Dattorro Reverberator delays
+	// Thanks to khoin: https://github.com/khoin
+	makeDelay(length) {
+		let size = Math.round(length * 0.001 * sampleRate);
+		let nextPow2 = 2 ** Math.ceil(Math.log2((size)));
+		return [
+			// [0] delay array, [1] write-head, [2] read-head, [3] delaysize
+			new Float32Array(nextPow2), nextPow2-1, 0 | 0, nextPow2 - 1
+		];
+	}
+	// write to specific delayline at delaysize
+	writeDelay(i, data) {
+		return this.delays[i][0][this.delays[i][1]] = data;
+	}
+	// read from delayline at specified time in milliseconds
+	readDelayAt(i, ms) {
+		let s = Math.round(ms * 0.001 * sampleRate);
+		return this.delays[i][0][(this.delays[i][2] - s) & this.delays[i][3]];
+	}
+	// read from a delayline with linear interpolation in delaytimes
+	lerpDelayAt(i, ms){
+		let dt = ms * 0.001 * sampleRate;
+		let p = trunc(dt);
+		let x = fract(dt);
+
+		let d0 = this.delays[i][0][(this.delays[i][2] - p & this.delays[i][3])];
+		let d1 = this.delays[i][0][(this.delays[i][2]-(p+1) & this.delays[i][3])];
+		return mix(d0, d1, x);
+	}
+	// read from delayline with cubic interpolation at specified time in ms
+	// Cubic interpolation from: O. Niemitalo:
+	// https://www.musicdsp.org/en/latest/Other/49-cubic-interpollation.html
+	readDelayCAt(i, ms) {
+		let s = ms * 0.001 * sampleRate;
+
+		let d = this.delays[i],
+			frac = s - ~~s,
+			int = ~~s + d[2] - 1,
+			mask = d[3];
+
+		let x0 = d[0][int++ & mask],
+			x1 = d[0][int++ & mask],
+			x2 = d[0][int++ & mask],
+			x3 = d[0][int & mask];
+
+		let a = (3 * (x1 - x2) - x0 + x3) / 2,
+			b = 2 * x2 + x0 - (5 * x1 + x3) / 2,
+			c = (x2 - x0) / 2;
+
+		return (((a * frac) + b) * frac + c) * frac + x1;
+	}
+	// move the read and writeheads of the delayline
+	updateReadWriteHeads(i){
+		// increment read and write heads in delay and wrap at delaysize
+		this.delays[i][1] = (this.delays[i][1] + 1) & this.delays[i][3];
+		this.delays[i][2] = (this.delays[i][2] + 1) & this.delays[i][3];
+	}
+}
+
 // Various noise type processors for the MonoNoise source
 // Type 2 is Pink noise, used from Tone.Noise('pink') instead of calc
 //
-class NoiseProcessor extends AudioWorkletProcessor {
+class NoiseProcessor extends ExtendedWorkletProcessor {
 	static get parameterDescriptors(){
-		return [{
-			name: 'type',
-			defaultValue: 5,
-			minValue: 0,
-			maxValue: 5
-		},{
-			name: 'density',
-			defaultValue: 0.125,
-			minValue: 0,
-			maxValue: 1
-		}];
+		return formatDescriptors([
+			[ 'type', 5, 0, 5, 'a-rate' ],
+			[ 'density', 0.125, 0, 1, 'a-rate' ]
+		]);
 	}
 	
 	constructor(){
@@ -60,7 +204,7 @@ class NoiseProcessor extends AudioWorkletProcessor {
 				else if (t < 3){		
 					this.prev += biNoise * d*d;
 					this.prev = Math.asin(Math.sin(this.prev * HALF_PI)) / HALF_PI;
-					out = this.prev * 0.707;
+					out = this.prev * 0.7079;
 				}
 				// Lo-Fi (sampled) noise
 				// creates random values at a specified frequency and slowly 
@@ -78,7 +222,7 @@ class NoiseProcessor extends AudioWorkletProcessor {
 					}
 					// linear interpolation from previous to next point
 					out = this.prev + this.phasor * (this.latch - this.prev);
-					out *= 0.707;
+					out *= 0.7079;
 				}
 				// Dust noise
 				// randomly generate an impulse/click of value 1 depending 
@@ -100,7 +244,7 @@ class NoiseProcessor extends AudioWorkletProcessor {
 				output[0][i] = out;
 			}
 		}		
-		return true;
+		return this.running;
 	}
 }
 registerProcessor('noise-processor', NoiseProcessor);
