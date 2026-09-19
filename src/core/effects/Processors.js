@@ -424,13 +424,12 @@ registerProcessor('arctan-distortion-processor', ArctanDistortionProcessor);
 // 1 soft-clipping stage, 2 half-wave rectifier, 3 hard-clipping stage
 // Based on: https://github.com/hazza-music/EHX-Big-Muff-Pi-Emulation/blob/main/Technical%20Essay.pdf
 // 
-class FuzzProcessor extends AudioWorkletProcessor {
+class FuzzProcessor extends ExtendedWorkletProcessor {
 	static get parameterDescriptors() {
-		return [{
-			name: 'amount',
-			defaultValue: 5,
-			minValue: 1
-		}]
+		return formatDescriptors([
+			[ 'amount', 5, 1, MAX_DEF, 'a-rate' ],
+			[ 'drywet', 1, 0, 1, 'a-rate' ]
+		]);
 	}
 
 	constructor(){ 
@@ -445,6 +444,7 @@ class FuzzProcessor extends AudioWorkletProcessor {
 
 		const gain = parameters.amount[0];
 		const makeup = Math.max((1 - Math.pow((gain-1) / 63, 0.13)) * 0.395 + 0.605, 0.605);
+		const dw = parameters.drywet[0];
 
 		if (input.length > 0){
 			for (let channel = 0; channel < input.length; channel++){
@@ -459,11 +459,13 @@ class FuzzProcessor extends AudioWorkletProcessor {
 					// onepole lowpass filter for dc-block
 					this.history[channel] = (hc - this.history[channel]) * 0.0015 + this.history[channel];
 					// dc-block and gain compensation and output
-					output[channel][i] = (hc - this.history[channel]) * makeup;
+					const out = (hc - this.history[channel]) * makeup;
+					// apply drywet crossfade
+					output[channel][i] = mix(input[channel][i], out, dw);
 				}
 			}
 		}
-		return true;
+		return this.running;
 	}
 }
 registerProcessor('fuzz-processor', FuzzProcessor);
