@@ -9,7 +9,7 @@ Mercury Engine by Timo Hoogland (c) 2018-2025
 `);
 
 const Tone = require('tone');
-const Util = require('./core/Util.js');
+const { log, divToS } = require('./core/Util.js')
 const { MercuryInterpreter } = require('./interpreter');
 const { WebMidi } = require("webmidi");
 
@@ -67,19 +67,10 @@ class Mercury extends MercuryInterpreter {
 		Object.keys(this.defaultSamples).forEach((s) => {
 			this.defaultSamples[s] = this.baseUrl + this.defaultSamples[s];
 		});
-		// load the buffers from the github
-		this.buffers = new Tone.ToneAudioBuffers({
-			urls: this.defaultSamples,
-			onload: () => {
-				// console.log('Samples loaded', this.buffers);
-				// executes a callback from the class constructor
-				// if a callback is provided
-				if (onload){ onload(); }
-			},
-			onerror: () => {
-				console.error('Error loading audio file. Possibly internet is disconnected.');
-			}
-		});
+		this.buffers = new Tone.ToneAudioBuffers();
+		this.addDefaultSamples();
+		
+		console.log('buffers', this.buffers);
 	
 		// this.buffers = new Tone.ToneAudioBuffers();
 		// this.addBuffers('https://raw.githubusercontent.com/tmhglnd/mercury-engine/main/src/data/samples.json', () => {
@@ -151,7 +142,7 @@ class Mercury extends MercuryInterpreter {
 	// set the bpm and optionally ramp in milliseconds
 	setBPM(bpm, ramp=0) {
 		this.bpm = bpm;
-		let t = Util.divToS(ramp, bpm);
+		let t = divToS(ramp, bpm);
 		if (t > 0){
 			Tone.Transport.bpm.rampTo(bpm, t);
 		} else {
@@ -170,9 +161,21 @@ class Mercury extends MercuryInterpreter {
 		this.setBPM(bpm);
 	}
 
+	// load all the default samples from the json
+	addDefaultSamples(){
+		Object.keys(this.defaultSamples).forEach((s) => {
+			this.addBufferFromURL(this.defaultSamples[s], s);
+		});
+	}
+
 	// get all the default samples
 	getDefaultSamples(){
 		return this.defaultSamples;
+	}
+
+	// get all the contents of the buffers
+	getBuffers(){
+		return this.buffers;
 	}
 
 	// add files to the buffer from a single File Link
@@ -226,18 +229,20 @@ class Mercury extends MercuryInterpreter {
 		// remove leading/trailing whitespace
 		n = n.trim().replace(/[\s]+/g, '_');
 
-		// add to ToneAudioBuffers
-		this.buffers.add(n, url, () => {
-			Util.log(`sound added as: ${n}`);
-			URL.revokeObjectURL(url);
+		// can't have 2 samples with the sample name loaded
+		if (this.buffers.has(n)){
+			log(`sound '${n}' was already added - is now replaced`);
+		}
+		log(`loading sample: ${n}`);
 
-			// also add soundfiles to menu for easy selection
-			// let m = document.getElementById('sounds');
-			// let o = document.createElement('option');
-			// o.value = o.innerHTML = n;
-			// m.appendChild(o);
+		// load buffer and add to ToneAudioBuffers array
+		const buffer = new Tone.ToneAudioBuffer(url, () => {
+			this.buffers.add(n, buffer);
+
+			log(`sound added: ${n}`);
+			URL.revokeObjectURL(url);
 		}, (e) => {
-			Util.log(`error adding sound from: ${n}`);
+			log(`error adding sound from: ${n}`);
 		});
 	}
 
@@ -268,15 +273,10 @@ class Mercury extends MercuryInterpreter {
 		});
 	}
 
-	// get all the contents of the buffers
-	getBuffers(){
-		return this.buffers;
-	}
-
 	// set lowpass frequency cutoff and ramptime
 	setLowPass(f, t=0){
 		this.lowPass = (f === 'default')? 18000 : f;
-		t = Util.divToS(t, this.bpm);
+		t = divToS(t, this.bpm);
 		if (t > 0){
 			this.lowPassF.frequency.rampTo(this.lowPass, t, Tone.now());
 		} else {
@@ -287,7 +287,7 @@ class Mercury extends MercuryInterpreter {
 	// set highpass frequency cutoff and ramptime
 	setHighPass(f, t=0){
 		this.highPass = (f === 'default')? 20 : f;
-		t = Util.divToS(t, this.bpm);
+		t = divToS(t, this.bpm);
 		if (t > 0){
 			this.highPassF.frequency.rampTo(this.highPass, t, Tone.now());
 		} else {
@@ -298,7 +298,7 @@ class Mercury extends MercuryInterpreter {
 	// set volume in floatingpoint and ramptime
 	setVolume(v, t=0){
 		this.volume = (v === 'default')? 1 : v;
-		t = Util.divToS(t, this.bpm);
+		t = divToS(t, this.bpm);
 		if (t > 0){
 			this.gain.gain.rampTo(this.volume, t, Tone.now());
 		} else {
@@ -330,7 +330,7 @@ class Mercury extends MercuryInterpreter {
 				anchor.click();
 			}
 		} catch(e) {
-			Util.log(`Error starting/stopping recording ${e}`);
+			log(`Error starting/stopping recording ${e}`);
 		}
 	}
 

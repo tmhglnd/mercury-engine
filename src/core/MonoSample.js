@@ -1,5 +1,6 @@
 const Tone = require('tone');
-const Util = require('./Util.js');
+const { log, getParam, toMidi, lookup, toArray } = require('./Util.js');
+const { mtof, noteToMidi } = require('./Util.js');
 // const fxMap = require('./Effects.js');
 const Instrument = require('./Instrument.js');
 
@@ -35,39 +36,44 @@ class MonoSample extends Instrument {
 
 	sourceEvent(c, e, time){
 		// get the sample from array
-		let f = Util.getParam(this._sound, c);
+		let f = getParam(this._sound, c);
 
 		if (this.sample.buffer){
 			// clean-up previous buffer
 			this.sample.buffer.dispose();
 		}
 
-		if (!this._bufs.has(f)){	
-			Util.log(`${w} is not a valid sample name`);
-			// defaul sample if file doesn not exist
-			f = 'kick_909';
-		} 
-		
-		if (this._bufs.has(f)){	
-			this.sample.buffer = this._bufs.get(f);
+		if (!this._bufs.has(f)){
+			if (this._defaults[f]){
+				this._engine.addBufferFromURL(this._defaults[f], f);
+			} else {
+				// default sample if file does not exist
+				log(`${f} is not a loaded sample and not part of the default samplepack`);
+			}
 		} else {
-			// default sample if file does not exist
-			this.sample.buffer = this._bufs.get('kick_909');
+			this.sample.buffer = this._bufs.get(f);
 		}
+		
+		// if (this._bufs.has(f)){	
+		// 	this.sample.buffer = this._bufs.get(f);
+		// } else {
+		// 	// default sample if file does not exist
+		// 	this.sample.buffer = this._bufs.get('kick_909');
+		// }
 
 		// get speed and if 2d array pick randomly
-		let s = Util.getParam(this._speed, c);
+		let s = getParam(this._speed, c);
 
 		// check if note is not 'off'
-		let i = Util.getParam(this._note[0], c);
+		let i = getParam(this._note[0], c);
 		if (i !== 'off'){
 			// note as interval / octave coordinate
-			let o = Util.getParam(this._note[1], c);
-			let t = Util.getParam(this._tune, c);
+			let o = getParam(this._note[1], c);
+			let t = getParam(this._tune, c);
 
 			// reconstruct midi note value with scale, (0, 0) = 36
-			let n = Util.toMidi(i, o);
-			let r = Util.mtof(n) / t;
+			let n = toMidi(i, o);
+			let r = mtof(n) / t;
 			s = s * r;
 		}
 
@@ -78,7 +84,7 @@ class MonoSample extends Instrument {
 
 		// the duration of the buffer in seconds
 		let dur = this.sample.buffer.duration;
-		let l = Util.lookup(this._stretch, c);
+		let l = lookup(this._stretch, c);
 		let n = 1;
 		if (l){
 			n = dur / (60 * 4 / this.bpm()) / l;
@@ -87,7 +93,7 @@ class MonoSample extends Instrument {
 		this.sample.playbackRate = Math.max(Math.abs(s) * n, 0.0001);
 
 		// get the start position
-		let o = dur * Util.getParam(this._pos, c);
+		let o = dur * getParam(this._pos, c);
 
 		// when sample is loaded allow playback to start
 		if (this.sample.loaded){
@@ -97,62 +103,59 @@ class MonoSample extends Instrument {
 
 	sound(s){
 		// load all soundfiles and return as array
-		this._sound = this.checkBuffer(Util.toArray(s));
+		this._sound = toArray(s);
+		// this._sound = this.checkBuffer(toArray(s));
 	}
 
-	checkBuffer(a){
-		// check if file is part of the loaded samples
-		return a.map((s) => {
-			if (Array.isArray(s)) {
-				return this.checkBuffer(s);
-			}
-			// error if soundfile does not exist
-			else if (!this._bufs.has(s)){
-				// set default (or an ampty soundfile?)
-				Util.log(`sample ${s} not found`);
-				return 'kick_909';
-			}
-			return s;
-		});
-	}
+	// checkBuffer(a){
+	// 	// check if file is part of the loaded samples
+	// 	return a.map((s) => {
+	// 		if (Array.isArray(s)) {
+	// 			return this.checkBuffer(s);
+	// 		}
+	// 		// error if soundfile does not exist
+	// 		else if (!this._bufs.has(s)){
+	// 			// set default (or an ampty soundfile?)
+	// 			log(`sample ${s} not found`);
+	// 			return 'kick_909';
+	// 		}
+	// 		return s;
+	// 	});
+	// }
 
 	speed(s){
 		// set the speed pattern as an array
-		this._speed = Util.toArray(s);
+		this._speed = toArray(s);
 	}
 
 	tune(t=60){
 		// set the fundamental midi note for this sample in Hz, MIDI or Notename
-		this._tune = Util.toArray(t);
+		this._tune = toArray(t);
 		this._tune = this._tune.map((t) => {
 			if (typeof t === 'number'){
 				if (Math.floor(t) !== t){
 					return t;
 				}
-				return Util.mtof(t);
+				return mtof(t);
 			}
-			return Util.mtof(Util.noteToMidi(t));
+			return mtof(noteToMidi(t));
 		});
 	}
 
 	stretch(s){
 		// set the stretch loop bar length
-		this._stretch = Util.toArray(s);
+		this._stretch = toArray(s);
 	}
 
 	offset(o){
 		// set the playback start position as an array
-		this._pos = Util.toArray(o);
+		this._pos = toArray(o);
 	}
 
 	delete(){
 		// delete super class
 		super.delete();
 		// disconnect the sound dispose the player
-		this.source.stop();
-		this.source.disconnect();
-		this.source.dispose();
-
 		this.sample.stop();
 		this.sample.disconnect();
 		this.sample.dispose();

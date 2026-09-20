@@ -17106,7 +17106,8 @@ class MonoNoise extends Instrument {
 module.exports = MonoNoise;
 },{"./Instrument.js":57,"./Util.js":67,"tone":44}],61:[function(require,module,exports){
 const Tone = require('tone');
-const Util = require('./Util.js');
+const { log, getParam, toMidi, lookup, toArray } = require('./Util.js');
+const { mtof, noteToMidi } = require('./Util.js');
 // const fxMap = require('./Effects.js');
 const Instrument = require('./Instrument.js');
 
@@ -17142,39 +17143,44 @@ class MonoSample extends Instrument {
 
 	sourceEvent(c, e, time){
 		// get the sample from array
-		let f = Util.getParam(this._sound, c);
+		let f = getParam(this._sound, c);
 
 		if (this.sample.buffer){
 			// clean-up previous buffer
 			this.sample.buffer.dispose();
 		}
 
-		if (!this._bufs.has(f)){	
-			Util.log(`${w} is not a valid sample name`);
-			// defaul sample if file doesn not exist
-			f = 'kick_909';
-		} 
-		
-		if (this._bufs.has(f)){	
-			this.sample.buffer = this._bufs.get(f);
+		if (!this._bufs.has(f)){
+			if (this._defaults[f]){
+				this._engine.addBufferFromURL(this._defaults[f], f);
+			} else {
+				// default sample if file does not exist
+				log(`${f} is not a loaded sample and not part of the default samplepack`);
+			}
 		} else {
-			// default sample if file does not exist
-			this.sample.buffer = this._bufs.get('kick_909');
+			this.sample.buffer = this._bufs.get(f);
 		}
+		
+		// if (this._bufs.has(f)){	
+		// 	this.sample.buffer = this._bufs.get(f);
+		// } else {
+		// 	// default sample if file does not exist
+		// 	this.sample.buffer = this._bufs.get('kick_909');
+		// }
 
 		// get speed and if 2d array pick randomly
-		let s = Util.getParam(this._speed, c);
+		let s = getParam(this._speed, c);
 
 		// check if note is not 'off'
-		let i = Util.getParam(this._note[0], c);
+		let i = getParam(this._note[0], c);
 		if (i !== 'off'){
 			// note as interval / octave coordinate
-			let o = Util.getParam(this._note[1], c);
-			let t = Util.getParam(this._tune, c);
+			let o = getParam(this._note[1], c);
+			let t = getParam(this._tune, c);
 
 			// reconstruct midi note value with scale, (0, 0) = 36
-			let n = Util.toMidi(i, o);
-			let r = Util.mtof(n) / t;
+			let n = toMidi(i, o);
+			let r = mtof(n) / t;
 			s = s * r;
 		}
 
@@ -17185,7 +17191,7 @@ class MonoSample extends Instrument {
 
 		// the duration of the buffer in seconds
 		let dur = this.sample.buffer.duration;
-		let l = Util.lookup(this._stretch, c);
+		let l = lookup(this._stretch, c);
 		let n = 1;
 		if (l){
 			n = dur / (60 * 4 / this.bpm()) / l;
@@ -17194,7 +17200,7 @@ class MonoSample extends Instrument {
 		this.sample.playbackRate = Math.max(Math.abs(s) * n, 0.0001);
 
 		// get the start position
-		let o = dur * Util.getParam(this._pos, c);
+		let o = dur * getParam(this._pos, c);
 
 		// when sample is loaded allow playback to start
 		if (this.sample.loaded){
@@ -17204,62 +17210,59 @@ class MonoSample extends Instrument {
 
 	sound(s){
 		// load all soundfiles and return as array
-		this._sound = this.checkBuffer(Util.toArray(s));
+		this._sound = toArray(s);
+		// this._sound = this.checkBuffer(toArray(s));
 	}
 
-	checkBuffer(a){
-		// check if file is part of the loaded samples
-		return a.map((s) => {
-			if (Array.isArray(s)) {
-				return this.checkBuffer(s);
-			}
-			// error if soundfile does not exist
-			else if (!this._bufs.has(s)){
-				// set default (or an ampty soundfile?)
-				Util.log(`sample ${s} not found`);
-				return 'kick_909';
-			}
-			return s;
-		});
-	}
+	// checkBuffer(a){
+	// 	// check if file is part of the loaded samples
+	// 	return a.map((s) => {
+	// 		if (Array.isArray(s)) {
+	// 			return this.checkBuffer(s);
+	// 		}
+	// 		// error if soundfile does not exist
+	// 		else if (!this._bufs.has(s)){
+	// 			// set default (or an ampty soundfile?)
+	// 			log(`sample ${s} not found`);
+	// 			return 'kick_909';
+	// 		}
+	// 		return s;
+	// 	});
+	// }
 
 	speed(s){
 		// set the speed pattern as an array
-		this._speed = Util.toArray(s);
+		this._speed = toArray(s);
 	}
 
 	tune(t=60){
 		// set the fundamental midi note for this sample in Hz, MIDI or Notename
-		this._tune = Util.toArray(t);
+		this._tune = toArray(t);
 		this._tune = this._tune.map((t) => {
 			if (typeof t === 'number'){
 				if (Math.floor(t) !== t){
 					return t;
 				}
-				return Util.mtof(t);
+				return mtof(t);
 			}
-			return Util.mtof(Util.noteToMidi(t));
+			return mtof(noteToMidi(t));
 		});
 	}
 
 	stretch(s){
 		// set the stretch loop bar length
-		this._stretch = Util.toArray(s);
+		this._stretch = toArray(s);
 	}
 
 	offset(o){
 		// set the playback start position as an array
-		this._pos = Util.toArray(o);
+		this._pos = toArray(o);
 	}
 
 	delete(){
 		// delete super class
 		super.delete();
 		// disconnect the sound dispose the player
-		this.source.stop();
-		this.source.disconnect();
-		this.source.dispose();
-
 		this.sample.stop();
 		this.sample.disconnect();
 		this.sample.dispose();
@@ -18886,7 +18889,7 @@ Mercury Engine by Timo Hoogland (c) 2018-2025
 `);
 
 const Tone = require('tone');
-const Util = require('./core/Util.js');
+const { log, divToS } = require('./core/Util.js')
 const { MercuryInterpreter } = require('./interpreter');
 const { WebMidi } = require("webmidi");
 
@@ -18944,19 +18947,10 @@ class Mercury extends MercuryInterpreter {
 		Object.keys(this.defaultSamples).forEach((s) => {
 			this.defaultSamples[s] = this.baseUrl + this.defaultSamples[s];
 		});
-		// load the buffers from the github
-		this.buffers = new Tone.ToneAudioBuffers({
-			urls: this.defaultSamples,
-			onload: () => {
-				// console.log('Samples loaded', this.buffers);
-				// executes a callback from the class constructor
-				// if a callback is provided
-				if (onload){ onload(); }
-			},
-			onerror: () => {
-				console.error('Error loading audio file. Possibly internet is disconnected.');
-			}
-		});
+		this.buffers = new Tone.ToneAudioBuffers();
+		this.addDefaultSamples();
+		
+		console.log('buffers', this.buffers);
 	
 		// this.buffers = new Tone.ToneAudioBuffers();
 		// this.addBuffers('https://raw.githubusercontent.com/tmhglnd/mercury-engine/main/src/data/samples.json', () => {
@@ -19028,7 +19022,7 @@ class Mercury extends MercuryInterpreter {
 	// set the bpm and optionally ramp in milliseconds
 	setBPM(bpm, ramp=0) {
 		this.bpm = bpm;
-		let t = Util.divToS(ramp, bpm);
+		let t = divToS(ramp, bpm);
 		if (t > 0){
 			Tone.Transport.bpm.rampTo(bpm, t);
 		} else {
@@ -19047,9 +19041,21 @@ class Mercury extends MercuryInterpreter {
 		this.setBPM(bpm);
 	}
 
+	// load all the default samples from the json
+	addDefaultSamples(){
+		Object.keys(this.defaultSamples).forEach((s) => {
+			this.addBufferFromURL(this.defaultSamples[s], s);
+		});
+	}
+
 	// get all the default samples
 	getDefaultSamples(){
 		return this.defaultSamples;
+	}
+
+	// get all the contents of the buffers
+	getBuffers(){
+		return this.buffers;
 	}
 
 	// add files to the buffer from a single File Link
@@ -19103,18 +19109,20 @@ class Mercury extends MercuryInterpreter {
 		// remove leading/trailing whitespace
 		n = n.trim().replace(/[\s]+/g, '_');
 
-		// add to ToneAudioBuffers
-		this.buffers.add(n, url, () => {
-			Util.log(`sound added as: ${n}`);
-			URL.revokeObjectURL(url);
+		// can't have 2 samples with the sample name loaded
+		if (this.buffers.has(n)){
+			log(`sound '${n}' was already added - is now replaced`);
+		}
+		log(`loading sample: ${n}`);
 
-			// also add soundfiles to menu for easy selection
-			// let m = document.getElementById('sounds');
-			// let o = document.createElement('option');
-			// o.value = o.innerHTML = n;
-			// m.appendChild(o);
+		// load buffer and add to ToneAudioBuffers array
+		const buffer = new Tone.ToneAudioBuffer(url, () => {
+			this.buffers.add(n, buffer);
+
+			log(`sound added: ${n}`);
+			URL.revokeObjectURL(url);
 		}, (e) => {
-			Util.log(`error adding sound from: ${n}`);
+			log(`error adding sound from: ${n}`);
 		});
 	}
 
@@ -19145,15 +19153,10 @@ class Mercury extends MercuryInterpreter {
 		});
 	}
 
-	// get all the contents of the buffers
-	getBuffers(){
-		return this.buffers;
-	}
-
 	// set lowpass frequency cutoff and ramptime
 	setLowPass(f, t=0){
 		this.lowPass = (f === 'default')? 18000 : f;
-		t = Util.divToS(t, this.bpm);
+		t = divToS(t, this.bpm);
 		if (t > 0){
 			this.lowPassF.frequency.rampTo(this.lowPass, t, Tone.now());
 		} else {
@@ -19164,7 +19167,7 @@ class Mercury extends MercuryInterpreter {
 	// set highpass frequency cutoff and ramptime
 	setHighPass(f, t=0){
 		this.highPass = (f === 'default')? 20 : f;
-		t = Util.divToS(t, this.bpm);
+		t = divToS(t, this.bpm);
 		if (t > 0){
 			this.highPassF.frequency.rampTo(this.highPass, t, Tone.now());
 		} else {
@@ -19175,7 +19178,7 @@ class Mercury extends MercuryInterpreter {
 	// set volume in floatingpoint and ramptime
 	setVolume(v, t=0){
 		this.volume = (v === 'default')? 1 : v;
-		t = Util.divToS(t, this.bpm);
+		t = divToS(t, this.bpm);
 		if (t > 0){
 			this.gain.gain.rampTo(this.volume, t, Tone.now());
 		} else {
@@ -19207,7 +19210,7 @@ class Mercury extends MercuryInterpreter {
 				anchor.click();
 			}
 		} catch(e) {
-			Util.log(`Error starting/stopping recording ${e}`);
+			log(`Error starting/stopping recording ${e}`);
 		}
 	}
 
