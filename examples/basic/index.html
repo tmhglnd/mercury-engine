@@ -91,8 +91,7 @@
 		// a button for starting and stopping a recording
 		let b3 = document.getElementById('b3');
 		b3.onclick = () => {
-			// if not recording, start the recording
-			// otherwise stop the recording
+			// if not recording, start the recording otherwise stop
 			Engine.record(!Engine.isRecording());
 			// change the button text accordingly
 			if (Engine.isRecording()){

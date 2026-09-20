@@ -17807,7 +17807,7 @@ class PolySample extends PolyInstrument {
 
 		if (!this._bufs.has(b)){
 			if (this._defaults[b]){
-				this._engine.addBufferFromUrl(this._defaults[b], b);
+				this._engine.addBufferFromURL(this._defaults[b], b);
 			} else {
 				log(`${b} is not a loaded sample and not part of the default samplepack`);
 			}
@@ -19156,6 +19156,11 @@ class Mercury extends MercuryInterpreter {
 			.catch((error) => {
 				console.error(`WebMIDI not enabled: ${error}`);
 			});
+		}
+		// evaluate the onload callback
+		if (onload) { 
+			console.log('onload is deprecated');
+			onload(this);
 		}
 	}
 

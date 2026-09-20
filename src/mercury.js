@@ -103,6 +103,11 @@ class Mercury extends MercuryInterpreter {
 				console.error(`WebMIDI not enabled: ${error}`);
 			});
 		}
+		// evaluate the onload callback
+		if (onload) { 
+			console.log('onload is deprecated');
+			onload(this);
+		}
 	}
 
 	// resume webaudio and transport

@@ -37,20 +37,16 @@
 		// generate some visuals
 		osc(10, 0.2, () => amp * 20).hue(() => amp * 5).out();
 
-		// Initialize a Mercury engine with callback function when loaded
-		const Engine = new Mercury({
-			onload: () => {
-				console.log('The engine and sounds are loaded!');
-				// when ready create the meter and set an interval to update
-				// the value for the visuals. 16ms is chosen because of 
-				// 1000ms/60fps = 16.667
-				Engine.addMeter();
-				setInterval(() => {
-					amp = Engine.getMeter();
-					consoleMeter(amp);
-				}, 16);
-			}
-		});
+		// Initialize a Mercury engine
+		const Engine = new Mercury();
+		
+		// Create the meter and set an interval to update the value for
+		// the visuals. 16ms is chosen because of 1000ms/60fps = 16.667
+		Engine.addMeter();
+		setInterval(() => {
+			amp = Engine.getMeter();
+			consoleMeter(amp);
+		}, 16);
 
 		// Some mercury code initially created
 		const mercuryCode = `
@@ -72,10 +68,13 @@
 
 		// function for "led bar meter print"
 		function consoleMeter(m){
-			leds = Math.floor((m ** 0.5) * 30);
-			disp = '';
-			for (let i=0; i<leds; i++){ disp += '▊'; }
-			console.log(`vol: ${disp}`);
+			// only print if loud enough amplitude
+			if (m > 0.0001){
+				leds = Math.floor((m ** 0.5) * 30);
+				disp = '';
+				for (let i = 0; i < leds; i++){ disp += '▊'; }
+				console.log(`vol: ${disp}`);
+			}
 		}
 	</script>
 </body>
