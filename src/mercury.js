@@ -1,6 +1,6 @@
 
 console.log(`
-Mercury Engine by Timo Hoogland (c) 2018-2025
+Mercury Engine by Timo Hoogland (c) 2018-2026
 	more info:
 	https://www.timohoogland.com
 	https://github.com/tmhglnd/mercury-playground
@@ -67,15 +67,9 @@ class Mercury extends MercuryInterpreter {
 		Object.keys(this.defaultSamples).forEach((s) => {
 			this.defaultSamples[s] = this.baseUrl + this.defaultSamples[s];
 		});
+		// console.log('sample paths', this.defaultSamples);
 		this.buffers = new Tone.ToneAudioBuffers();
-		this.addDefaultSamples();
-		
-		console.log('buffers', this.buffers);
-	
-		// this.buffers = new Tone.ToneAudioBuffers();
-		// this.addBuffers('https://raw.githubusercontent.com/tmhglnd/mercury-engine/main/src/data/samples.json', () => {
-		// 	console.log('Samples loaded', this.buffers._buffers.keys());
-		// });
+		// this.addDefaultSamples();
 
 		// the midi status, inputs and outputs
 		this.midi = { enabled: false, inputs: [], outputs: [] };

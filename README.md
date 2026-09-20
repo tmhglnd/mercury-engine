@@ -1,17 +1,15 @@
-⚠️ **WORK IN PROGRESS, EXPERIMENTAL USE ONLY** ⚠️
-
 # 🌕 Mercury Engine
 
-**The engine (core) of the Mercury Live Coding Environment for the browser**
+**The audio engine (core) of the Mercury Live Coding Environment for the browser**
 
-This Package does not include the browser editor and user interface. This package allows you to include the Mercury webaudio engine into your own web projects and generate sound from the Mercury code. This engine is used in the [Mercury-Playground](https://github.com/tmhglnd/mercury-playground), a browser based version of the environment.
+This Package does not include the browser editor and user interface. This package allows you to include the Mercury webaudio engine into your own web projects and generate sound on your page with Mercury code. This engine is used in the [Mercury-Playground](https://github.com/tmhglnd/mercury-playground), a browser based version of the Mercury Live Coding Environment.
 
 Mercury currently has 2 versions:
 
 * Web version running in the browser (Windows/Mac/Linux) [go to this repo](https://github.com/tmhglnd/mercury-playground)
-* Original version running in Max8 (Windows/Mac only) [go to this repo](https://github.com/tmhglnd/mercury)
+* Original version running in MaxMSP (Windows/Mac only) [go to this repo](https://github.com/tmhglnd/mercury)
 
-[**🚀 Start Sketching Online!** (recommended for beginners)](https://mercury.timohoogland.com/)
+[**🚀 Start sketching online at mercury-playground.cc!** (recommended for beginners)](https://mercury-playground.cc)
 
 <!-- **👾 Or code with the latest full version in Max8:**  -->
 <!-- [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/tmhglnd/mercury)](https://github.com/tmhglnd/mercury/releases)
@@ -123,6 +121,20 @@ Engine.getCode();
 ```
 
 ### Samples
+
+By default no samples are loaded when including the Mercury Engine. The reason for this is to improve loading speed and reduce memory usage and data usage when downloading. Samples that are needed will be loaded when starting the code, this may result in not hearing the samples immediately, depending on your download speed. Mercury will look for the sample name in the default library and download it. If the sample is not found it will log a warning to the console.
+
+You can force to load all the default samples by running the function:
+
+```js
+Engine.addDefaultSamples()
+```
+
+You can get a dictionary of all the default samples and their associated url with:
+
+```js
+Engine.getDefaultSamples()
+```
 
 Add your own samples from for example a url like raw github or freesound. The url can also contain a .json file that references multiple samples and the sample name.
 

@@ -18880,7 +18880,7 @@ module.exports = { MercuryInterpreter }
 },{"./core/MonoInput.js":58,"./core/MonoMidi.js":59,"./core/MonoNoise.js":60,"./core/MonoSample.js":61,"./core/MonoSynth.js":62,"./core/PolySample.js":64,"./core/PolySynth.js":65,"./core/Util.js":67,"./data/genre-tempos.json":68,"mercury-lang":27,"total-serialism":47}],70:[function(require,module,exports){
 
 console.log(`
-Mercury Engine by Timo Hoogland (c) 2018-2025
+Mercury Engine by Timo Hoogland (c) 2018-2026
 	more info:
 	https://www.timohoogland.com
 	https://github.com/tmhglnd/mercury-playground
@@ -18947,15 +18947,9 @@ class Mercury extends MercuryInterpreter {
 		Object.keys(this.defaultSamples).forEach((s) => {
 			this.defaultSamples[s] = this.baseUrl + this.defaultSamples[s];
 		});
+		// console.log('sample paths', this.defaultSamples);
 		this.buffers = new Tone.ToneAudioBuffers();
-		this.addDefaultSamples();
-		
-		console.log('buffers', this.buffers);
-	
-		// this.buffers = new Tone.ToneAudioBuffers();
-		// this.addBuffers('https://raw.githubusercontent.com/tmhglnd/mercury-engine/main/src/data/samples.json', () => {
-		// 	console.log('Samples loaded', this.buffers._buffers.keys());
-		// });
+		// this.addDefaultSamples();
 
 		// the midi status, inputs and outputs
 		this.midi = { enabled: false, inputs: [], outputs: [] };
