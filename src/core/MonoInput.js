@@ -1,6 +1,6 @@
 const Tone = require('tone');
 const Instrument = require('./Instrument.js');
-const Util = require('./Util.js');
+const { log } = require('./Util.js');
 
 class MonoInput extends Instrument {
 	constructor(engine, d, canvas){
@@ -11,7 +11,7 @@ class MonoInput extends Instrument {
 		} else if (d.match(/in(\d+)/g)){
 			this._device = Number(d.match(/in(\d+)/)[1]);
 		} else {
-			Util.log(`${d} is not a valid microphone input. defaults to in0`);
+			log(`${d} is not a valid microphone input. defaults to in0`);
 			this._device = 0;
 		}
 
@@ -24,13 +24,15 @@ class MonoInput extends Instrument {
 	createSource(){
 		this.mic = new Tone.UserMedia().connect(this.channelStrip());
 		this.mic.open(this._device).then(() => {
-			Util.log(`Opened microphone: ${window.devices[this._device]}`);
+			log(`Opened microphone: ${window.devices[this._device]}`);
 		}).catch((e) => {
-			Util.log(`Unable to use microphone`);
+			log(`Unable to use microphone`);
 		});
 		this.mic.channelInterpretation = 'discrete';
-		
+		// set the source to be the microphone
 		this.source = this.mic;
+		// use the stop function as the close function
+		this.source.stop = this.source.close;
 	}
 
 	sourceEvent(c, e, time){
@@ -40,10 +42,6 @@ class MonoInput extends Instrument {
 	delete(){
 		// delete super class
 		super.delete();
-		// disconnect the sound dispose the player
-		this.source.close();
-		this.source.disconnect();
-		this.source.dispose();
 
 		console.log('=> disposed MonoInput()', this._sound);
 	}

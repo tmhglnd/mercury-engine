@@ -16534,7 +16534,7 @@ const WorkletDelay = function(_params) {
 
 },{"./Util.js":67,"tone":44,"total-serialism":47}],57:[function(require,module,exports){
 const Tone = require('tone');
-const Util = require('./Util.js');
+const { toArray, getParam, isRandom, atodb, msToS, divToS, log } = require('./Util.js');
 const fxMap = require('./Effects.js');
 const Sequencer = require('./Sequencer.js');
 
@@ -16544,8 +16544,12 @@ class Instrument extends Sequencer {
 		// Inherit from Sequencer
 		super(engine, canvas);
 
+		// reference to all the default samples to be used
+		// by inheriting classes monosample, polysample
+		this._defaults = this._engine.getDefaultSamples();
+
 		// Instrument specific parameters
-		this._gain = [-6, 0];		
+		this._gain = [ 0.5, 0];		
 		this._pan = [ 0 ];
 		this._att = [ 0 ];
 		this._sus = [ 0 ];
@@ -16565,29 +16569,20 @@ class Instrument extends Sequencer {
 	}
 
 	channelStrip(){
-		// gain => output
+		// gain => output (for fade-in/out from evaluation)
 		this.gain = new Tone.Gain(0, "normalRange").toDestination();
 		// postfx-gain => gain (for gain() function in instrument)
 		this.post = new Tone.Gain(1, "gain").connect(this.gain);
 		// panning => gain
 		this.panner = new Tone.Panner(0).connect(this.post);
-		// adsr => panning
+		// adsr => panning (for shape() function)
 		this.adsr = this.envelope(this.panner);
 		// return Node to connect source => adsr
 		return this.adsr;
 	}
 
 	envelope(d){
-		// return an Envelope and connect to next node
-		// return new Tone.AmplitudeEnvelope({
-		// 	attack: 0,
-		// 	attackCurve: "linear",
-		// 	decay: 0,
-		// 	decayCurve: "linear",
-		// 	sustain: 1,
-		// 	release: 0.001,
-		// 	releaseCurve: "linear"
-		// }).connect(d);
+		// the adsr is a basic Gain node with lin/exp rampTo functions
 		return new Tone.Gain(0).connect(d);
 	}
 
@@ -16604,35 +16599,23 @@ class Instrument extends Sequencer {
 		}
 		
 		// set panning
-		let p = Util.getParam(this._pan, c);
-		p = Util.isRandom(p, -1, 1);
+		let p = getParam(this._pan, c);
+		p = isRandom(p, -1, 1);
 		this.panner.pan.setValueAtTime(p, time);
 
 		// ramp volume
-		// let g = Util.atodb(Util.getParam(this._gain[0], c) * 0.707);
-		let g = Util.getParam(this._gain[0], c) * 0.707;
-		let r = Util.msToS(Math.max(0, Util.getParam(this._gain[1], c)));
-		// this.source.volume.rampTo(g, r, time);
-		this.source.volume.setValueAtTime(1, time);
+		// let g = atodb(getParam(this._gain[0], c) * 0.707);
+		let g = getParam(this._gain[0], c) * 0.7079;
+		let r = msToS(Math.max(0, getParam(this._gain[1], c)));
 		this.post.gain.rampTo(g, r, time);
 
 		this.sourceEvent(c, e, time);
 
-		// fade-out running envelope over 5 ms
-		// retrigger temporarily disabled to reduce distortion
-		// if (this.adsr.value > 0){
-		// 	let tmp = this.adsr.release;
-		// 	this.adsr.release = 0.004;
-		// 	this.adsr.triggerRelease(time-0.004);
-		// 	this.adsr.release = tmp;
-		// 	time += 0.010;
-		// }
-
 		// set shape for playback (fade-in / out and length)
 		if (this._att){
-			const att = Math.max(Util.divToS(Util.getParam(this._att, c), this.bpm()), 0.001);
-			const dec = Util.divToS(Util.getParam(this._sus, c), this.bpm());
-			const rel = Math.max(Util.divToS(Util.getParam(this._rel, c), this.bpm()), 0.001);
+			const att = Math.max(divToS(getParam(this._att, c), this.bpm()), 0.001);
+			const dec = Math.max(divToS(getParam(this._sus, c), this.bpm()), 0);
+			const rel = Math.max(divToS(getParam(this._rel, c), this.bpm()), 0.001);
 			
 			// short ramp for retrigger, fades out the envelope over 2 ms
 			// use the retrigger time to schedule the event a bit later as well
@@ -16648,7 +16631,8 @@ class Instrument extends Sequencer {
 			this.adsr.gain.exponentialRampTo(0.0, rel * 5, time + att + dec + retrigger);
 		} else {
 			// if shape is 'off' turn on the gain of the envelope
-			this.adsr.gain.setValueAtTime(1.0, time);
+			// this.adsr.gain.setValueAtTime(1.0, time);
+			this.adsr.gain.linearRampTo(1.0, 0.005, time);
 		}
 	}
 
@@ -16716,8 +16700,8 @@ class Instrument extends Sequencer {
 
 	amp(g, r){
 		// set the gain and ramp time
-		this._gain[0] = Util.toArray(g);
-		this._gain[1] = (r !== undefined)? Util.toArray(r) : [ 0 ];
+		this._gain[0] = toArray(g);
+		this._gain[1] = (r !== undefined)? toArray(r) : [ 0 ];
 
 		// convert amplitude to dBFullScale
 		// this._gain[0] = g.map(g => 20 * Math.log(g * 0.707) );
@@ -16736,23 +16720,23 @@ class Instrument extends Sequencer {
 			if (e.length === 1){
 				// one argument is release time
 				this._att = [ 1 ];
-				this._rel = Util.toArray(e[0]);
+				this._rel = toArray(e[0]);
 			} else if (e.length === 2){
 				// two arguments is attack & release
-				this._att = Util.toArray(e[0]);
-				this._rel = Util.toArray(e[1]);
+				this._att = toArray(e[0]);
+				this._rel = toArray(e[1]);
 			} else {
 				// three is attack stustain and release
-				this._att = Util.toArray(e[0]);
-				this._sus = Util.toArray(e[1]);
-				this._rel = Util.toArray(e[2]);
+				this._att = toArray(e[0]);
+				this._sus = toArray(e[1]);
+				this._rel = toArray(e[2]);
 			}
 		}
 	}
 
 	pan(p){
 		// the panning position of the sound
-		this._pan = Util.toArray(p);
+		this._pan = toArray(p);
 	}
 
 	add_fx(...fx){
@@ -16764,12 +16748,12 @@ class Instrument extends Sequencer {
 				let tmpF = fxMap[f[0]](f.slice(1));
 				this._fx.push(tmpF);
 			} else {
-				Util.log(`Effect ${f[0]} does not exist`);
+				log(`Effect ${f[0]} does not exist`);
 			}
 		});
 		// if any fx working
 		if (this._fx.length){
-			console.log(`Adding effect chain`, this._fx);
+			// console.log(`Adding effect chain`, this._fx);
 			// disconnect the panner
 			this.panner.disconnect();
 			// iterate over effects and get chain (send/return)
@@ -16796,7 +16780,7 @@ module.exports = Instrument;
 },{"./Effects.js":56,"./Sequencer.js":66,"./Util.js":67,"tone":44}],58:[function(require,module,exports){
 const Tone = require('tone');
 const Instrument = require('./Instrument.js');
-const Util = require('./Util.js');
+const { log } = require('./Util.js');
 
 class MonoInput extends Instrument {
 	constructor(engine, d, canvas){
@@ -16807,7 +16791,7 @@ class MonoInput extends Instrument {
 		} else if (d.match(/in(\d+)/g)){
 			this._device = Number(d.match(/in(\d+)/)[1]);
 		} else {
-			Util.log(`${d} is not a valid microphone input. defaults to in0`);
+			log(`${d} is not a valid microphone input. defaults to in0`);
 			this._device = 0;
 		}
 
@@ -16820,13 +16804,15 @@ class MonoInput extends Instrument {
 	createSource(){
 		this.mic = new Tone.UserMedia().connect(this.channelStrip());
 		this.mic.open(this._device).then(() => {
-			Util.log(`Opened microphone: ${window.devices[this._device]}`);
+			log(`Opened microphone: ${window.devices[this._device]}`);
 		}).catch((e) => {
-			Util.log(`Unable to use microphone`);
+			log(`Unable to use microphone`);
 		});
 		this.mic.channelInterpretation = 'discrete';
-		
+		// set the source to be the microphone
 		this.source = this.mic;
+		// use the stop function as the close function
+		this.source.stop = this.source.close;
 	}
 
 	sourceEvent(c, e, time){
@@ -16836,10 +16822,6 @@ class MonoInput extends Instrument {
 	delete(){
 		// delete super class
 		super.delete();
-		// disconnect the sound dispose the player
-		this.source.close();
-		this.source.disconnect();
-		this.source.dispose();
 
 		console.log('=> disposed MonoInput()', this._sound);
 	}
@@ -18922,7 +18904,7 @@ class Mercury extends MercuryInterpreter {
 		super({ hydra, p5canvas });
 
 		// store sample files in buffers
-		this.samples = JSON.parse("{\n  \"_base\": \"https://raw.githubusercontent.com/tmhglnd/mercury-playground/main/public/assets/samples/\",\n  \"noise_a\": \"noise/noise_a.wav\",\n  \"drone_cymbal\": \"ambient/cymbal/drone_cymbal.wav\",\n  \"drone_cymbal_01\": \"ambient/cymbal/drone_cymbal_01.wav\",\n  \"clap_808\": \"drums/clap/clap_808.wav\",\n  \"clap_808_short\": \"drums/clap/clap_808_short.wav\",\n  \"clap_909\": \"drums/clap/clap_909.wav\",\n  \"clap_min\": \"drums/clap/clap_min.wav\",\n  \"clap_nord\": \"drums/clap/clap_nord.wav\",\n  \"hat_808\": \"drums/hat/hat_808.wav\",\n  \"hat_808_half\": \"drums/hat/hat_808_half.wav\",\n  \"hat_808_open\": \"drums/hat/hat_808_open.wav\",\n  \"hat_909\": \"drums/hat/hat_909.wav\",\n  \"hat_909_half\": \"drums/hat/hat_909_half.wav\",\n  \"hat_909_open\": \"drums/hat/hat_909_open.wav\",\n  \"hat_909_short\": \"drums/hat/hat_909_short.wav\",\n  \"hat_click\": \"drums/hat/hat_click.wav\",\n  \"hat_dub\": \"drums/hat/hat_dub.wav\",\n  \"hat_min\": \"drums/hat/hat_min.wav\",\n  \"hat_min_open\": \"drums/hat/hat_min_open.wav\",\n  \"hat_nord\": \"drums/hat/hat_nord.wav\",\n  \"hat_nord_open\": \"drums/hat/hat_nord_open.wav\",\n  \"kick_808\": \"drums/kick/kick_808.wav\",\n  \"kick_808_dist\": \"drums/kick/kick_808_dist.wav\",\n  \"kick_909\": \"drums/kick/kick_909.wav\",\n  \"kick_909_dist\": \"drums/kick/kick_909_dist.wav\",\n  \"kick_909_dist_long\": \"drums/kick/kick_909_dist_long.wav\",\n  \"kick_909_long\": \"drums/kick/kick_909_long.wav\",\n  \"kick_deep\": \"drums/kick/kick_deep.wav\",\n  \"kick_dub\": \"drums/kick/kick_dub.wav\",\n  \"kick_house\": \"drums/kick/kick_house.wav\",\n  \"kick_min\": \"drums/kick/kick_min.wav\",\n  \"kick_nord\": \"drums/kick/kick_nord.wav\",\n  \"kick_nord_long\": \"drums/kick/kick_nord_long.wav\",\n  \"kick_sub\": \"drums/kick/kick_sub.wav\",\n  \"kick_ua\": \"drums/kick/kick_ua.wav\",\n  \"kick_vintage\": \"drums/kick/kick_vintage.wav\",\n  \"block\": \"drums/perc/block.wav\",\n  \"block_lo\": \"drums/perc/block_lo.wav\",\n  \"bongo\": \"drums/perc/bongo.wav\",\n  \"bongo_lo\": \"drums/perc/bongo_lo.wav\",\n  \"clave_808\": \"drums/perc/clave_808.wav\",\n  \"cowbell_808\": \"drums/perc/cowbell_808.wav\",\n  \"cymbal_808\": \"drums/perc/cymbal_808.wav\",\n  \"maracas_808\": \"drums/perc/maracas_808.wav\",\n  \"wood_nord_hi\": \"drums/perc/wood_nord_hi.wav\",\n  \"wood_nord_lo\": \"drums/perc/wood_nord_lo.wav\",\n  \"wood_nord_mid\": \"drums/perc/wood_nord_mid.wav\",\n  \"snare_808\": \"drums/snare/snare_808.wav\",\n  \"snare_909\": \"drums/snare/snare_909.wav\",\n  \"snare_909_short\": \"drums/snare/snare_909_short.wav\",\n  \"snare_ac\": \"drums/snare/snare_ac.wav\",\n  \"snare_dnb\": \"drums/snare/snare_dnb.wav\",\n  \"snare_dub\": \"drums/snare/snare_dub.wav\",\n  \"snare_fat\": \"drums/snare/snare_fat.wav\",\n  \"snare_hvy\": \"drums/snare/snare_hvy.wav\",\n  \"snare_min\": \"drums/snare/snare_min.wav\",\n  \"snare_nord\": \"drums/snare/snare_nord.wav\",\n  \"snare_nord_hi\": \"drums/snare/snare_nord_hi.wav\",\n  \"snare_rock\": \"drums/snare/snare_rock.wav\",\n  \"snare_step\": \"drums/snare/snare_step.wav\",\n  \"tabla_01\": \"drums/tabla/tabla_01.wav\",\n  \"tabla_02\": \"drums/tabla/tabla_02.wav\",\n  \"tabla_03\": \"drums/tabla/tabla_03.wav\",\n  \"tabla_hi\": \"drums/tabla/tabla_hi.wav\",\n  \"tabla_hi_long\": \"drums/tabla/tabla_hi_long.wav\",\n  \"tabla_hi_short\": \"drums/tabla/tabla_hi_short.wav\",\n  \"tabla_lo\": \"drums/tabla/tabla_lo.wav\",\n  \"tabla_lo_long\": \"drums/tabla/tabla_lo_long.wav\",\n  \"tabla_lo_short\": \"drums/tabla/tabla_lo_short.wav\",\n  \"tabla_mid\": \"drums/tabla/tabla_mid.wav\",\n  \"tabla_mid_long\": \"drums/tabla/tabla_mid_long.wav\",\n  \"tabla_mid_short\": \"drums/tabla/tabla_mid_short.wav\",\n  \"tom_808\": \"drums/tom/tom_808.wav\",\n  \"tom_hi\": \"drums/tom/tom_hi.wav\",\n  \"tom_lo\": \"drums/tom/tom_lo.wav\",\n  \"tom_mid\": \"drums/tom/tom_mid.wav\",\n  \"tom_nord_hi\": \"drums/tom/tom_nord_hi.wav\",\n  \"tom_nord_lo\": \"drums/tom/tom_nord_lo.wav\",\n  \"tongue\": \"foley/body/tongue.wav\",\n  \"tongue_lo\": \"foley/body/tongue_lo.wav\",\n  \"shatter\": \"foley/glass/shatter.wav\",\n  \"metal\": \"foley/metal/metal.wav\",\n  \"metal_lo\": \"foley/metal/metal_lo.wav\",\n  \"wobble\": \"foley/plastic/wobble.wav\",\n  \"wobble_02\": \"foley/plastic/wobble_02.wav\",\n  \"door\": \"foley/wood/door.wav\",\n  \"scrape\": \"foley/wood/scrape.wav\",\n  \"scrape_01\": \"foley/wood/scrape_01.wav\",\n  \"wood_hit\": \"foley/wood/wood_hit.wav\",\n  \"wood_metal\": \"foley/wood/wood_metal.wav\",\n  \"wood_plate\": \"foley/wood/wood_plate.wav\",\n  \"bell\": \"idiophone/bell/bell.wav\",\n  \"chimes\": \"idiophone/chimes/chimes.wav\",\n  \"chimes_chord\": \"idiophone/chimes/chimes_chord.wav\",\n  \"chimes_chord_01\": \"idiophone/chimes/chimes_chord_01.wav\",\n  \"chimes_chord_02\": \"idiophone/chimes/chimes_chord_02.wav\",\n  \"chimes_hi\": \"idiophone/chimes/chimes_hi.wav\",\n  \"glock_c5\": \"idiophone/glockenspiel/glock_c5.wav\",\n  \"glock_c6\": \"idiophone/glockenspiel/glock_c6.wav\",\n  \"glock_g4\": \"idiophone/glockenspiel/glock_g4.wav\",\n  \"glock_g5\": \"idiophone/glockenspiel/glock_g5.wav\",\n  \"gong_hi\": \"idiophone/gong/gong_hi.wav\",\n  \"gong_lo\": \"idiophone/gong/gong_lo.wav\",\n  \"kalimba_a\": \"idiophone/kalimba/kalimba_a.wav\",\n  \"kalimba_ab\": \"idiophone/kalimba/kalimba_ab.wav\",\n  \"kalimba_cis\": \"idiophone/kalimba/kalimba_cis.wav\",\n  \"kalimba_e\": \"idiophone/kalimba/kalimba_e.wav\",\n  \"kalimba_g\": \"idiophone/kalimba/kalimba_g.wav\",\n  \"marimba_b2\": \"idiophone/marimba/marimba_b2.wav\",\n  \"marimba_c2\": \"idiophone/marimba/marimba_c2.wav\",\n  \"marimba_c4\": \"idiophone/marimba/marimba_c4.wav\",\n  \"marimba_f3\": \"idiophone/marimba/marimba_f3.wav\",\n  \"marimba_g2\": \"idiophone/marimba/marimba_g2.wav\",\n  \"marimba_g4\": \"idiophone/marimba/marimba_g4.wav\",\n  \"bamboo_a\": \"idiophone/marimba-bamboo/bamboo_a.wav\",\n  \"bamboo_c\": \"idiophone/marimba-bamboo/bamboo_c.wav\",\n  \"bamboo_f\": \"idiophone/marimba-bamboo/bamboo_f.wav\",\n  \"bamboo_g\": \"idiophone/marimba-bamboo/bamboo_g.wav\",\n  \"box_a4\": \"idiophone/musicbox/box_a4.wav\",\n  \"box_b4\": \"idiophone/musicbox/box_b4.wav\",\n  \"box_b5\": \"idiophone/musicbox/box_b5.wav\",\n  \"box_c5\": \"idiophone/musicbox/box_c5.wav\",\n  \"box_d5\": \"idiophone/musicbox/box_d5.wav\",\n  \"box_d6\": \"idiophone/musicbox/box_d6.wav\",\n  \"box_g3\": \"idiophone/musicbox/box_g3.wav\",\n  \"box_g5\": \"idiophone/musicbox/box_g5.wav\",\n  \"bowl_hi\": \"idiophone/singing-bowl/bowl_hi.wav\",\n  \"bowl_lo\": \"idiophone/singing-bowl/bowl_lo.wav\",\n  \"bowl_mid\": \"idiophone/singing-bowl/bowl_mid.wav\",\n  \"xylo_c4\": \"idiophone/xylophone/xylo_c4.wav\",\n  \"xylo_c5\": \"idiophone/xylophone/xylo_c5.wav\",\n  \"xylo_c6\": \"idiophone/xylophone/xylo_c6.wav\",\n  \"xylo_g3\": \"idiophone/xylophone/xylo_g3.wav\",\n  \"xylo_g4\": \"idiophone/xylophone/xylo_g4.wav\",\n  \"xylo_g5\": \"idiophone/xylophone/xylo_g5.wav\",\n  \"rhodes_8bit\": \"keys/pad/rhodes_8bit.wav\",\n  \"piano_a\": \"keys/piano/piano_a.wav\",\n  \"piano_b\": \"keys/piano/piano_b.wav\",\n  \"piano_c\": \"keys/piano/piano_c.wav\",\n  \"piano_d\": \"keys/piano/piano_d.wav\",\n  \"piano_e\": \"keys/piano/piano_e.wav\",\n  \"piano_f\": \"keys/piano/piano_f.wav\",\n  \"piano_g\": \"keys/piano/piano_g.wav\",\n  \"amen\": \"loops/breaks/amen.wav\",\n  \"amen_alt\": \"loops/breaks/amen_alt.wav\",\n  \"amen_break\": \"loops/breaks/amen_break.wav\",\n  \"amen_fill\": \"loops/breaks/amen_fill.wav\",\n  \"house\": \"loops/breaks/house.wav\",\n  \"chimes_l\": \"loops/chimes/chimes_l.wav\",\n  \"noise_c\": \"loops/noise/noise_c.wav\",\n  \"noise_e\": \"loops/noise/noise_e.wav\",\n  \"noise_e_01\": \"loops/noise/noise_e_01.wav\",\n  \"noise_mw\": \"loops/noise/noise_mw.wav\",\n  \"noise_p\": \"loops/noise/noise_p.wav\",\n  \"noise_r\": \"loops/noise/noise_r.wav\",\n  \"choir_01\": \"vocal/choir/choir_01.wav\",\n  \"choir_02\": \"vocal/choir/choir_02.wav\",\n  \"choir_03\": \"vocal/choir/choir_03.wav\",\n  \"choir_o\": \"vocal/choir/choir_o.wav\",\n  \"bell_c4\": \"woodwinds-flutes/bell/bell_c4.wav\",\n  \"bell_c5\": \"woodwinds-flutes/bell/bell_c5.wav\",\n  \"bell_f5\": \"woodwinds-flutes/bell/bell_f5.wav\",\n  \"bell_g4\": \"woodwinds-flutes/bell/bell_g4.wav\",\n  \"clarinet_a2\": \"woodwinds-flutes/clarinet/clarinet_a2.wav\",\n  \"clarinet_a3\": \"woodwinds-flutes/clarinet/clarinet_a3.wav\",\n  \"clarinet_d2\": \"woodwinds-flutes/clarinet/clarinet_d2.wav\",\n  \"clarinet_d3\": \"woodwinds-flutes/clarinet/clarinet_d3.wav\",\n  \"clarinet_f2\": \"woodwinds-flutes/clarinet/clarinet_f2.wav\",\n  \"clarinet_f3\": \"woodwinds-flutes/clarinet/clarinet_f3.wav\",\n  \"flute_a3\": \"woodwinds-flutes/flute/flute_a3.wav\",\n  \"flute_a4\": \"woodwinds-flutes/flute/flute_a4.wav\",\n  \"flute_c3\": \"woodwinds-flutes/flute/flute_c3.wav\",\n  \"flute_c4\": \"woodwinds-flutes/flute/flute_c4.wav\",\n  \"flute_c5\": \"woodwinds-flutes/flute/flute_c5.wav\",\n  \"flute_e3\": \"woodwinds-flutes/flute/flute_e3.wav\",\n  \"flute_e4\": \"woodwinds-flutes/flute/flute_e4.wav\",\n  \"oboe_a2\": \"woodwinds-flutes/oboe/oboe_a2.wav\",\n  \"oboe_a3\": \"woodwinds-flutes/oboe/oboe_a3.wav\",\n  \"oboe_d3\": \"woodwinds-flutes/oboe/oboe_d3.wav\",\n  \"oboe_d4\": \"woodwinds-flutes/oboe/oboe_d4.wav\",\n  \"oboe_f3\": \"woodwinds-flutes/oboe/oboe_f3.wav\",\n  \"oboe_f4\": \"woodwinds-flutes/oboe/oboe_f4.wav\",\n  \"wiper\": \"loops/foley/car/wiper.wav\",\n  \"wiper_out\": \"loops/foley/car/wiper_out.wav\",\n  \"wood_l\": \"loops/foley/wood/wood_l.wav\",\n  \"wood_l_01\": \"loops/foley/wood/wood_l_01.wav\",\n  \"violin_a\": \"string/bowed/violin/violin_a.wav\",\n  \"violin_b\": \"string/bowed/violin/violin_b.wav\",\n  \"violin_c\": \"string/bowed/violin/violin_c.wav\",\n  \"violin_d\": \"string/bowed/violin/violin_d.wav\",\n  \"violin_e\": \"string/bowed/violin/violin_e.wav\",\n  \"violin_f\": \"string/bowed/violin/violin_f.wav\",\n  \"violin_g\": \"string/bowed/violin/violin_g.wav\",\n  \"harp_a2\": \"string/plucked/harp/harp_a2.wav\",\n  \"harp_a4\": \"string/plucked/harp/harp_a4.wav\",\n  \"harp_b3\": \"string/plucked/harp/harp_b3.wav\",\n  \"harp_b5\": \"string/plucked/harp/harp_b5.wav\",\n  \"harp_c3\": \"string/plucked/harp/harp_c3.wav\",\n  \"harp_c5\": \"string/plucked/harp/harp_c5.wav\",\n  \"harp_d4\": \"string/plucked/harp/harp_d4.wav\",\n  \"harp_down\": \"string/plucked/harp/harp_down.wav\",\n  \"harp_e3\": \"string/plucked/harp/harp_e3.wav\",\n  \"harp_e5\": \"string/plucked/harp/harp_e5.wav\",\n  \"harp_f4\": \"string/plucked/harp/harp_f4.wav\",\n  \"harp_g3\": \"string/plucked/harp/harp_g3.wav\",\n  \"harp_g5\": \"string/plucked/harp/harp_g5.wav\",\n  \"harp_up\": \"string/plucked/harp/harp_up.wav\",\n  \"pluck_a\": \"string/plucked/violin/pluck_a.wav\",\n  \"pluck_b\": \"string/plucked/violin/pluck_b.wav\",\n  \"pluck_c\": \"string/plucked/violin/pluck_c.wav\",\n  \"pluck_d\": \"string/plucked/violin/pluck_d.wav\",\n  \"pluck_e\": \"string/plucked/violin/pluck_e.wav\",\n  \"pluck_f\": \"string/plucked/violin/pluck_f.wav\",\n  \"pluck_g\": \"string/plucked/violin/pluck_g.wav\"\n}\n");
+		this.defaultSamples = JSON.parse("{\n  \"_base\": \"https://raw.githubusercontent.com/tmhglnd/mercury-playground/main/public/assets/samples/\",\n  \"noise_a\": \"noise/noise_a.wav\",\n  \"drone_cymbal\": \"ambient/cymbal/drone_cymbal.wav\",\n  \"drone_cymbal_01\": \"ambient/cymbal/drone_cymbal_01.wav\",\n  \"clap_808\": \"drums/clap/clap_808.wav\",\n  \"clap_808_short\": \"drums/clap/clap_808_short.wav\",\n  \"clap_909\": \"drums/clap/clap_909.wav\",\n  \"clap_min\": \"drums/clap/clap_min.wav\",\n  \"clap_nord\": \"drums/clap/clap_nord.wav\",\n  \"hat_808\": \"drums/hat/hat_808.wav\",\n  \"hat_808_half\": \"drums/hat/hat_808_half.wav\",\n  \"hat_808_open\": \"drums/hat/hat_808_open.wav\",\n  \"hat_909\": \"drums/hat/hat_909.wav\",\n  \"hat_909_half\": \"drums/hat/hat_909_half.wav\",\n  \"hat_909_open\": \"drums/hat/hat_909_open.wav\",\n  \"hat_909_short\": \"drums/hat/hat_909_short.wav\",\n  \"hat_click\": \"drums/hat/hat_click.wav\",\n  \"hat_dub\": \"drums/hat/hat_dub.wav\",\n  \"hat_min\": \"drums/hat/hat_min.wav\",\n  \"hat_min_open\": \"drums/hat/hat_min_open.wav\",\n  \"hat_nord\": \"drums/hat/hat_nord.wav\",\n  \"hat_nord_open\": \"drums/hat/hat_nord_open.wav\",\n  \"kick_808\": \"drums/kick/kick_808.wav\",\n  \"kick_808_dist\": \"drums/kick/kick_808_dist.wav\",\n  \"kick_909\": \"drums/kick/kick_909.wav\",\n  \"kick_909_dist\": \"drums/kick/kick_909_dist.wav\",\n  \"kick_909_dist_long\": \"drums/kick/kick_909_dist_long.wav\",\n  \"kick_909_long\": \"drums/kick/kick_909_long.wav\",\n  \"kick_deep\": \"drums/kick/kick_deep.wav\",\n  \"kick_dub\": \"drums/kick/kick_dub.wav\",\n  \"kick_house\": \"drums/kick/kick_house.wav\",\n  \"kick_min\": \"drums/kick/kick_min.wav\",\n  \"kick_nord\": \"drums/kick/kick_nord.wav\",\n  \"kick_nord_long\": \"drums/kick/kick_nord_long.wav\",\n  \"kick_sub\": \"drums/kick/kick_sub.wav\",\n  \"kick_ua\": \"drums/kick/kick_ua.wav\",\n  \"kick_vintage\": \"drums/kick/kick_vintage.wav\",\n  \"block\": \"drums/perc/block.wav\",\n  \"block_lo\": \"drums/perc/block_lo.wav\",\n  \"bongo\": \"drums/perc/bongo.wav\",\n  \"bongo_lo\": \"drums/perc/bongo_lo.wav\",\n  \"clave_808\": \"drums/perc/clave_808.wav\",\n  \"cowbell_808\": \"drums/perc/cowbell_808.wav\",\n  \"cymbal_808\": \"drums/perc/cymbal_808.wav\",\n  \"maracas_808\": \"drums/perc/maracas_808.wav\",\n  \"wood_nord_hi\": \"drums/perc/wood_nord_hi.wav\",\n  \"wood_nord_lo\": \"drums/perc/wood_nord_lo.wav\",\n  \"wood_nord_mid\": \"drums/perc/wood_nord_mid.wav\",\n  \"snare_808\": \"drums/snare/snare_808.wav\",\n  \"snare_909\": \"drums/snare/snare_909.wav\",\n  \"snare_909_short\": \"drums/snare/snare_909_short.wav\",\n  \"snare_ac\": \"drums/snare/snare_ac.wav\",\n  \"snare_dnb\": \"drums/snare/snare_dnb.wav\",\n  \"snare_dub\": \"drums/snare/snare_dub.wav\",\n  \"snare_fat\": \"drums/snare/snare_fat.wav\",\n  \"snare_hvy\": \"drums/snare/snare_hvy.wav\",\n  \"snare_min\": \"drums/snare/snare_min.wav\",\n  \"snare_nord\": \"drums/snare/snare_nord.wav\",\n  \"snare_nord_hi\": \"drums/snare/snare_nord_hi.wav\",\n  \"snare_rock\": \"drums/snare/snare_rock.wav\",\n  \"snare_step\": \"drums/snare/snare_step.wav\",\n  \"tabla_01\": \"drums/tabla/tabla_01.wav\",\n  \"tabla_02\": \"drums/tabla/tabla_02.wav\",\n  \"tabla_03\": \"drums/tabla/tabla_03.wav\",\n  \"tabla_hi\": \"drums/tabla/tabla_hi.wav\",\n  \"tabla_hi_long\": \"drums/tabla/tabla_hi_long.wav\",\n  \"tabla_hi_short\": \"drums/tabla/tabla_hi_short.wav\",\n  \"tabla_lo\": \"drums/tabla/tabla_lo.wav\",\n  \"tabla_lo_long\": \"drums/tabla/tabla_lo_long.wav\",\n  \"tabla_lo_short\": \"drums/tabla/tabla_lo_short.wav\",\n  \"tabla_mid\": \"drums/tabla/tabla_mid.wav\",\n  \"tabla_mid_long\": \"drums/tabla/tabla_mid_long.wav\",\n  \"tabla_mid_short\": \"drums/tabla/tabla_mid_short.wav\",\n  \"tom_808\": \"drums/tom/tom_808.wav\",\n  \"tom_hi\": \"drums/tom/tom_hi.wav\",\n  \"tom_lo\": \"drums/tom/tom_lo.wav\",\n  \"tom_mid\": \"drums/tom/tom_mid.wav\",\n  \"tom_nord_hi\": \"drums/tom/tom_nord_hi.wav\",\n  \"tom_nord_lo\": \"drums/tom/tom_nord_lo.wav\",\n  \"tongue\": \"foley/body/tongue.wav\",\n  \"tongue_lo\": \"foley/body/tongue_lo.wav\",\n  \"shatter\": \"foley/glass/shatter.wav\",\n  \"metal\": \"foley/metal/metal.wav\",\n  \"metal_lo\": \"foley/metal/metal_lo.wav\",\n  \"wobble\": \"foley/plastic/wobble.wav\",\n  \"wobble_02\": \"foley/plastic/wobble_02.wav\",\n  \"door\": \"foley/wood/door.wav\",\n  \"scrape\": \"foley/wood/scrape.wav\",\n  \"scrape_01\": \"foley/wood/scrape_01.wav\",\n  \"wood_hit\": \"foley/wood/wood_hit.wav\",\n  \"wood_metal\": \"foley/wood/wood_metal.wav\",\n  \"wood_plate\": \"foley/wood/wood_plate.wav\",\n  \"bell\": \"idiophone/bell/bell.wav\",\n  \"chimes\": \"idiophone/chimes/chimes.wav\",\n  \"chimes_chord\": \"idiophone/chimes/chimes_chord.wav\",\n  \"chimes_chord_01\": \"idiophone/chimes/chimes_chord_01.wav\",\n  \"chimes_chord_02\": \"idiophone/chimes/chimes_chord_02.wav\",\n  \"chimes_hi\": \"idiophone/chimes/chimes_hi.wav\",\n  \"glock_c5\": \"idiophone/glockenspiel/glock_c5.wav\",\n  \"glock_c6\": \"idiophone/glockenspiel/glock_c6.wav\",\n  \"glock_g4\": \"idiophone/glockenspiel/glock_g4.wav\",\n  \"glock_g5\": \"idiophone/glockenspiel/glock_g5.wav\",\n  \"gong_hi\": \"idiophone/gong/gong_hi.wav\",\n  \"gong_lo\": \"idiophone/gong/gong_lo.wav\",\n  \"kalimba_a\": \"idiophone/kalimba/kalimba_a.wav\",\n  \"kalimba_ab\": \"idiophone/kalimba/kalimba_ab.wav\",\n  \"kalimba_cis\": \"idiophone/kalimba/kalimba_cis.wav\",\n  \"kalimba_e\": \"idiophone/kalimba/kalimba_e.wav\",\n  \"kalimba_g\": \"idiophone/kalimba/kalimba_g.wav\",\n  \"marimba_b2\": \"idiophone/marimba/marimba_b2.wav\",\n  \"marimba_c2\": \"idiophone/marimba/marimba_c2.wav\",\n  \"marimba_c4\": \"idiophone/marimba/marimba_c4.wav\",\n  \"marimba_f3\": \"idiophone/marimba/marimba_f3.wav\",\n  \"marimba_g2\": \"idiophone/marimba/marimba_g2.wav\",\n  \"marimba_g4\": \"idiophone/marimba/marimba_g4.wav\",\n  \"bamboo_a\": \"idiophone/marimba-bamboo/bamboo_a.wav\",\n  \"bamboo_c\": \"idiophone/marimba-bamboo/bamboo_c.wav\",\n  \"bamboo_f\": \"idiophone/marimba-bamboo/bamboo_f.wav\",\n  \"bamboo_g\": \"idiophone/marimba-bamboo/bamboo_g.wav\",\n  \"box_a4\": \"idiophone/musicbox/box_a4.wav\",\n  \"box_b4\": \"idiophone/musicbox/box_b4.wav\",\n  \"box_b5\": \"idiophone/musicbox/box_b5.wav\",\n  \"box_c5\": \"idiophone/musicbox/box_c5.wav\",\n  \"box_d5\": \"idiophone/musicbox/box_d5.wav\",\n  \"box_d6\": \"idiophone/musicbox/box_d6.wav\",\n  \"box_g3\": \"idiophone/musicbox/box_g3.wav\",\n  \"box_g5\": \"idiophone/musicbox/box_g5.wav\",\n  \"bowl_hi\": \"idiophone/singing-bowl/bowl_hi.wav\",\n  \"bowl_lo\": \"idiophone/singing-bowl/bowl_lo.wav\",\n  \"bowl_mid\": \"idiophone/singing-bowl/bowl_mid.wav\",\n  \"xylo_c4\": \"idiophone/xylophone/xylo_c4.wav\",\n  \"xylo_c5\": \"idiophone/xylophone/xylo_c5.wav\",\n  \"xylo_c6\": \"idiophone/xylophone/xylo_c6.wav\",\n  \"xylo_g3\": \"idiophone/xylophone/xylo_g3.wav\",\n  \"xylo_g4\": \"idiophone/xylophone/xylo_g4.wav\",\n  \"xylo_g5\": \"idiophone/xylophone/xylo_g5.wav\",\n  \"rhodes_8bit\": \"keys/pad/rhodes_8bit.wav\",\n  \"piano_a\": \"keys/piano/piano_a.wav\",\n  \"piano_b\": \"keys/piano/piano_b.wav\",\n  \"piano_c\": \"keys/piano/piano_c.wav\",\n  \"piano_d\": \"keys/piano/piano_d.wav\",\n  \"piano_e\": \"keys/piano/piano_e.wav\",\n  \"piano_f\": \"keys/piano/piano_f.wav\",\n  \"piano_g\": \"keys/piano/piano_g.wav\",\n  \"amen\": \"loops/breaks/amen.wav\",\n  \"amen_alt\": \"loops/breaks/amen_alt.wav\",\n  \"amen_break\": \"loops/breaks/amen_break.wav\",\n  \"amen_fill\": \"loops/breaks/amen_fill.wav\",\n  \"house\": \"loops/breaks/house.wav\",\n  \"chimes_l\": \"loops/chimes/chimes_l.wav\",\n  \"noise_c\": \"loops/noise/noise_c.wav\",\n  \"noise_e\": \"loops/noise/noise_e.wav\",\n  \"noise_e_01\": \"loops/noise/noise_e_01.wav\",\n  \"noise_mw\": \"loops/noise/noise_mw.wav\",\n  \"noise_p\": \"loops/noise/noise_p.wav\",\n  \"noise_r\": \"loops/noise/noise_r.wav\",\n  \"choir_01\": \"vocal/choir/choir_01.wav\",\n  \"choir_02\": \"vocal/choir/choir_02.wav\",\n  \"choir_03\": \"vocal/choir/choir_03.wav\",\n  \"choir_o\": \"vocal/choir/choir_o.wav\",\n  \"bell_c4\": \"woodwinds-flutes/bell/bell_c4.wav\",\n  \"bell_c5\": \"woodwinds-flutes/bell/bell_c5.wav\",\n  \"bell_f5\": \"woodwinds-flutes/bell/bell_f5.wav\",\n  \"bell_g4\": \"woodwinds-flutes/bell/bell_g4.wav\",\n  \"clarinet_a2\": \"woodwinds-flutes/clarinet/clarinet_a2.wav\",\n  \"clarinet_a3\": \"woodwinds-flutes/clarinet/clarinet_a3.wav\",\n  \"clarinet_d2\": \"woodwinds-flutes/clarinet/clarinet_d2.wav\",\n  \"clarinet_d3\": \"woodwinds-flutes/clarinet/clarinet_d3.wav\",\n  \"clarinet_f2\": \"woodwinds-flutes/clarinet/clarinet_f2.wav\",\n  \"clarinet_f3\": \"woodwinds-flutes/clarinet/clarinet_f3.wav\",\n  \"flute_a3\": \"woodwinds-flutes/flute/flute_a3.wav\",\n  \"flute_a4\": \"woodwinds-flutes/flute/flute_a4.wav\",\n  \"flute_c3\": \"woodwinds-flutes/flute/flute_c3.wav\",\n  \"flute_c4\": \"woodwinds-flutes/flute/flute_c4.wav\",\n  \"flute_c5\": \"woodwinds-flutes/flute/flute_c5.wav\",\n  \"flute_e3\": \"woodwinds-flutes/flute/flute_e3.wav\",\n  \"flute_e4\": \"woodwinds-flutes/flute/flute_e4.wav\",\n  \"oboe_a2\": \"woodwinds-flutes/oboe/oboe_a2.wav\",\n  \"oboe_a3\": \"woodwinds-flutes/oboe/oboe_a3.wav\",\n  \"oboe_d3\": \"woodwinds-flutes/oboe/oboe_d3.wav\",\n  \"oboe_d4\": \"woodwinds-flutes/oboe/oboe_d4.wav\",\n  \"oboe_f3\": \"woodwinds-flutes/oboe/oboe_f3.wav\",\n  \"oboe_f4\": \"woodwinds-flutes/oboe/oboe_f4.wav\",\n  \"wiper\": \"loops/foley/car/wiper.wav\",\n  \"wiper_out\": \"loops/foley/car/wiper_out.wav\",\n  \"wood_l\": \"loops/foley/wood/wood_l.wav\",\n  \"wood_l_01\": \"loops/foley/wood/wood_l_01.wav\",\n  \"violin_a\": \"string/bowed/violin/violin_a.wav\",\n  \"violin_b\": \"string/bowed/violin/violin_b.wav\",\n  \"violin_c\": \"string/bowed/violin/violin_c.wav\",\n  \"violin_d\": \"string/bowed/violin/violin_d.wav\",\n  \"violin_e\": \"string/bowed/violin/violin_e.wav\",\n  \"violin_f\": \"string/bowed/violin/violin_f.wav\",\n  \"violin_g\": \"string/bowed/violin/violin_g.wav\",\n  \"harp_a2\": \"string/plucked/harp/harp_a2.wav\",\n  \"harp_a4\": \"string/plucked/harp/harp_a4.wav\",\n  \"harp_b3\": \"string/plucked/harp/harp_b3.wav\",\n  \"harp_b5\": \"string/plucked/harp/harp_b5.wav\",\n  \"harp_c3\": \"string/plucked/harp/harp_c3.wav\",\n  \"harp_c5\": \"string/plucked/harp/harp_c5.wav\",\n  \"harp_d4\": \"string/plucked/harp/harp_d4.wav\",\n  \"harp_down\": \"string/plucked/harp/harp_down.wav\",\n  \"harp_e3\": \"string/plucked/harp/harp_e3.wav\",\n  \"harp_e5\": \"string/plucked/harp/harp_e5.wav\",\n  \"harp_f4\": \"string/plucked/harp/harp_f4.wav\",\n  \"harp_g3\": \"string/plucked/harp/harp_g3.wav\",\n  \"harp_g5\": \"string/plucked/harp/harp_g5.wav\",\n  \"harp_up\": \"string/plucked/harp/harp_up.wav\",\n  \"pluck_a\": \"string/plucked/violin/pluck_a.wav\",\n  \"pluck_b\": \"string/plucked/violin/pluck_b.wav\",\n  \"pluck_c\": \"string/plucked/violin/pluck_c.wav\",\n  \"pluck_d\": \"string/plucked/violin/pluck_d.wav\",\n  \"pluck_e\": \"string/plucked/violin/pluck_e.wav\",\n  \"pluck_f\": \"string/plucked/violin/pluck_f.wav\",\n  \"pluck_g\": \"string/plucked/violin/pluck_g.wav\"\n}\n");
 
 		// this.buffers = new Tone.ToneAudioBuffers();
 		// add the buffers via function
@@ -18955,14 +18937,14 @@ class Mercury extends MercuryInterpreter {
 		this.setCrossFade(250);
 
 		// get the base url and add to the sample locations
-		this.baseUrl = this.samples['_base'];
-		delete this.samples['_base'];
-		Object.keys(this.samples).forEach((s) => {
-			this.samples[s] = this.baseUrl + this.samples[s];
+		this.baseUrl = this.defaultSamples['_base'];
+		delete this.defaultSamples['_base'];
+		Object.keys(this.defaultSamples).forEach((s) => {
+			this.defaultSamples[s] = this.baseUrl + this.defaultSamples[s];
 		});
 		// load the buffers from the github
 		this.buffers = new Tone.ToneAudioBuffers({
-			urls: this.samples,
+			urls: this.defaultSamples,
 			onload: () => {
 				// console.log('Samples loaded', this.buffers);
 				// executes a callback from the class constructor
@@ -19061,6 +19043,11 @@ class Mercury extends MercuryInterpreter {
 	randomBPM(){
 		let bpm = Math.floor(Math.random() * 75) + 75.0;
 		this.setBPM(bpm);
+	}
+
+	// get all the default samples
+	getDefaultSamples(){
+		return this.defaultSamples;
 	}
 
 	// add files to the buffer from a single File Link

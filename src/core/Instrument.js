@@ -1,5 +1,5 @@
 const Tone = require('tone');
-const Util = require('./Util.js');
+const { toArray, getParam, isRandom, atodb, msToS, divToS, log } = require('./Util.js');
 const fxMap = require('./Effects.js');
 const Sequencer = require('./Sequencer.js');
 
@@ -9,8 +9,12 @@ class Instrument extends Sequencer {
 		// Inherit from Sequencer
 		super(engine, canvas);
 
+		// reference to all the default samples to be used
+		// by inheriting classes monosample, polysample
+		this._defaults = this._engine.getDefaultSamples();
+
 		// Instrument specific parameters
-		this._gain = [-6, 0];		
+		this._gain = [ 0.5, 0];		
 		this._pan = [ 0 ];
 		this._att = [ 0 ];
 		this._sus = [ 0 ];
@@ -30,29 +34,20 @@ class Instrument extends Sequencer {
 	}
 
 	channelStrip(){
-		// gain => output
+		// gain => output (for fade-in/out from evaluation)
 		this.gain = new Tone.Gain(0, "normalRange").toDestination();
 		// postfx-gain => gain (for gain() function in instrument)
 		this.post = new Tone.Gain(1, "gain").connect(this.gain);
 		// panning => gain
 		this.panner = new Tone.Panner(0).connect(this.post);
-		// adsr => panning
+		// adsr => panning (for shape() function)
 		this.adsr = this.envelope(this.panner);
 		// return Node to connect source => adsr
 		return this.adsr;
 	}
 
 	envelope(d){
-		// return an Envelope and connect to next node
-		// return new Tone.AmplitudeEnvelope({
-		// 	attack: 0,
-		// 	attackCurve: "linear",
-		// 	decay: 0,
-		// 	decayCurve: "linear",
-		// 	sustain: 1,
-		// 	release: 0.001,
-		// 	releaseCurve: "linear"
-		// }).connect(d);
+		// the adsr is a basic Gain node with lin/exp rampTo functions
 		return new Tone.Gain(0).connect(d);
 	}
 
@@ -69,35 +64,23 @@ class Instrument extends Sequencer {
 		}
 		
 		// set panning
-		let p = Util.getParam(this._pan, c);
-		p = Util.isRandom(p, -1, 1);
+		let p = getParam(this._pan, c);
+		p = isRandom(p, -1, 1);
 		this.panner.pan.setValueAtTime(p, time);
 
 		// ramp volume
-		// let g = Util.atodb(Util.getParam(this._gain[0], c) * 0.707);
-		let g = Util.getParam(this._gain[0], c) * 0.707;
-		let r = Util.msToS(Math.max(0, Util.getParam(this._gain[1], c)));
-		// this.source.volume.rampTo(g, r, time);
-		this.source.volume.setValueAtTime(1, time);
+		// let g = atodb(getParam(this._gain[0], c) * 0.707);
+		let g = getParam(this._gain[0], c) * 0.7079;
+		let r = msToS(Math.max(0, getParam(this._gain[1], c)));
 		this.post.gain.rampTo(g, r, time);
 
 		this.sourceEvent(c, e, time);
 
-		// fade-out running envelope over 5 ms
-		// retrigger temporarily disabled to reduce distortion
-		// if (this.adsr.value > 0){
-		// 	let tmp = this.adsr.release;
-		// 	this.adsr.release = 0.004;
-		// 	this.adsr.triggerRelease(time-0.004);
-		// 	this.adsr.release = tmp;
-		// 	time += 0.010;
-		// }
-
 		// set shape for playback (fade-in / out and length)
 		if (this._att){
-			const att = Math.max(Util.divToS(Util.getParam(this._att, c), this.bpm()), 0.001);
-			const dec = Util.divToS(Util.getParam(this._sus, c), this.bpm());
-			const rel = Math.max(Util.divToS(Util.getParam(this._rel, c), this.bpm()), 0.001);
+			const att = Math.max(divToS(getParam(this._att, c), this.bpm()), 0.001);
+			const dec = Math.max(divToS(getParam(this._sus, c), this.bpm()), 0);
+			const rel = Math.max(divToS(getParam(this._rel, c), this.bpm()), 0.001);
 			
 			// short ramp for retrigger, fades out the envelope over 2 ms
 			// use the retrigger time to schedule the event a bit later as well
@@ -113,7 +96,8 @@ class Instrument extends Sequencer {
 			this.adsr.gain.exponentialRampTo(0.0, rel * 5, time + att + dec + retrigger);
 		} else {
 			// if shape is 'off' turn on the gain of the envelope
-			this.adsr.gain.setValueAtTime(1.0, time);
+			// this.adsr.gain.setValueAtTime(1.0, time);
+			this.adsr.gain.linearRampTo(1.0, 0.005, time);
 		}
 	}
 
@@ -181,8 +165,8 @@ class Instrument extends Sequencer {
 
 	amp(g, r){
 		// set the gain and ramp time
-		this._gain[0] = Util.toArray(g);
-		this._gain[1] = (r !== undefined)? Util.toArray(r) : [ 0 ];
+		this._gain[0] = toArray(g);
+		this._gain[1] = (r !== undefined)? toArray(r) : [ 0 ];
 
 		// convert amplitude to dBFullScale
 		// this._gain[0] = g.map(g => 20 * Math.log(g * 0.707) );
@@ -201,23 +185,23 @@ class Instrument extends Sequencer {
 			if (e.length === 1){
 				// one argument is release time
 				this._att = [ 1 ];
-				this._rel = Util.toArray(e[0]);
+				this._rel = toArray(e[0]);
 			} else if (e.length === 2){
 				// two arguments is attack & release
-				this._att = Util.toArray(e[0]);
-				this._rel = Util.toArray(e[1]);
+				this._att = toArray(e[0]);
+				this._rel = toArray(e[1]);
 			} else {
 				// three is attack stustain and release
-				this._att = Util.toArray(e[0]);
-				this._sus = Util.toArray(e[1]);
-				this._rel = Util.toArray(e[2]);
+				this._att = toArray(e[0]);
+				this._sus = toArray(e[1]);
+				this._rel = toArray(e[2]);
 			}
 		}
 	}
 
 	pan(p){
 		// the panning position of the sound
-		this._pan = Util.toArray(p);
+		this._pan = toArray(p);
 	}
 
 	add_fx(...fx){
@@ -229,12 +213,12 @@ class Instrument extends Sequencer {
 				let tmpF = fxMap[f[0]](f.slice(1));
 				this._fx.push(tmpF);
 			} else {
-				Util.log(`Effect ${f[0]} does not exist`);
+				log(`Effect ${f[0]} does not exist`);
 			}
 		});
 		// if any fx working
 		if (this._fx.length){
-			console.log(`Adding effect chain`, this._fx);
+			// console.log(`Adding effect chain`, this._fx);
 			// disconnect the panner
 			this.panner.disconnect();
 			// iterate over effects and get chain (send/return)

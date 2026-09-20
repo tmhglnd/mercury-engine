@@ -29,7 +29,7 @@ class Mercury extends MercuryInterpreter {
 		super({ hydra, p5canvas });
 
 		// store sample files in buffers
-		this.samples = JSON.parse(fs.readFileSync('./src/data/samples.json', 'utf-8'));
+		this.defaultSamples = JSON.parse(fs.readFileSync('./src/data/samples.json', 'utf-8'));
 
 		// this.buffers = new Tone.ToneAudioBuffers();
 		// add the buffers via function
@@ -62,14 +62,14 @@ class Mercury extends MercuryInterpreter {
 		this.setCrossFade(250);
 
 		// get the base url and add to the sample locations
-		this.baseUrl = this.samples['_base'];
-		delete this.samples['_base'];
-		Object.keys(this.samples).forEach((s) => {
-			this.samples[s] = this.baseUrl + this.samples[s];
+		this.baseUrl = this.defaultSamples['_base'];
+		delete this.defaultSamples['_base'];
+		Object.keys(this.defaultSamples).forEach((s) => {
+			this.defaultSamples[s] = this.baseUrl + this.defaultSamples[s];
 		});
 		// load the buffers from the github
 		this.buffers = new Tone.ToneAudioBuffers({
-			urls: this.samples,
+			urls: this.defaultSamples,
 			onload: () => {
 				// console.log('Samples loaded', this.buffers);
 				// executes a callback from the class constructor
@@ -168,6 +168,11 @@ class Mercury extends MercuryInterpreter {
 	randomBPM(){
 		let bpm = Math.floor(Math.random() * 75) + 75.0;
 		this.setBPM(bpm);
+	}
+
+	// get all the default samples
+	getDefaultSamples(){
+		return this.defaultSamples;
 	}
 
 	// add files to the buffer from a single File Link
