@@ -356,9 +356,9 @@ class Mercury extends MercuryInterpreter {
 		}
 	}
 
-	// returns 'started' if the recording has started
+	// returns TRUE if the recording has started
 	isRecording(){
-		return this.recorder.state;
+		return this.recorder.state === 'started';
 	}
 
 	// add a Tone RMS meter to use for signal analysis

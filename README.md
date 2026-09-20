@@ -180,7 +180,7 @@ Start the recording of the sound
 Engine.record(true);
 ```
 
-Returns 'started' if the recording is on
+Returns `true` if the recording has started
 
 ```js
 Engine.isRecording();
