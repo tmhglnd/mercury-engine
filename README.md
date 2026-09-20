@@ -81,7 +81,7 @@ const { Mercury } = require('mercury-engine');
 Initialize the engine and include a callback function through { onload: }, this will be executed when loading is completed.
 
 ```js
-const Engine = Mercury({
+const Engine = new Mercury({
 	onload: (e) => {
 		console.log('This callback is called when loading is completed!');
 		console.log('The engine:', e);
@@ -92,6 +92,8 @@ const Engine = Mercury({
 :::important
 Samples are not loaded anymore at initialization to speed up loading times
 :::
+
+A quick one-liner
 
 ### Resume, evaluate and silence
 

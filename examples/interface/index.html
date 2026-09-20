@@ -53,7 +53,7 @@
 		function setup() {
 			noCanvas();
 			createP('filter');
-			cutoff = createSlider(50, 5000, 200, 0);
+			cutoff = createSlider(50, 5000, 100, 0);
 			createP('note');
 			note = createSlider(-12, 12, -10, 1);
 			createP('degrade');
@@ -84,7 +84,7 @@
 				set s1 fx(filter low '{cutoff.value()}' 0.4) 
 				set s1 super(3 '{detune.value()}')
 				set s1 fx(degrade '{degrade.value()}')
-				set s1 fx(fuzz '{distort.value()}' 0.6) 
+				set s1 fx(fuzz '{distort.value()}' 0.7) 
 				set s1 fx(reverb 0.5 '{verb.value()}')
 		`
 

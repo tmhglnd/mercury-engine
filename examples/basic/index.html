@@ -32,9 +32,9 @@
 
 		// Initialize a Mercury engine with callback function when loaded
 		const Engine = new Mercury({
-			onload: () => {
-				console.log('The engine and sounds are loaded!');
-				console.log('Samples loaded:', Engine.getBuffers());
+			onload: (engine) => {
+				console.log('The engine is loaded!');
+				// console.log('Still empty:', engine.getBuffers());
 			}
 		});
 

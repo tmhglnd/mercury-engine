@@ -77,8 +77,8 @@ function isRandom(a, l=0, h=1){
 function getParam(a, i){
 	// also check if value is an osc-address, then use last received value
 	// return randLookup(getOSC(lookup(a, i)));
-	// return evalExpr(randLookup(lookup(getOSC(a), i)));
-	return randLookup(lookup(getOSC(a), i));
+	// return randLookup(lookup(getOSC(a), i));
+	return evalExpr(randLookup(lookup(getOSC(a), i)));
 }
 
 // retrieve received messages via osc as arguments or pass through
