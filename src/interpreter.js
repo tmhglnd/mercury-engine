@@ -14,6 +14,7 @@ const PolySample = require('./core/PolySample.js');
 const Tempos = require('./data/genre-tempos.json');
 const Util = require('./core/Util.js');
 const { divToS } = require('./core/Util.js');
+const MonoFM = require('./core/MonoFM.js');
 
 class MercuryInterpreter {
 	constructor({ hydra, p5canvas } = {}){
@@ -238,8 +239,13 @@ class MercuryInterpreter {
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
-			'synth' : (obj) => {		
-				let inst = new MonoSynth(this, obj.type, this.canvas);
+			'synth' : (obj) => {
+				let inst;
+				if (obj.type === 'fm'){
+					inst = new MonoFM(this, obj.type, this.canvas);
+				} else {
+					inst = new MonoSynth(this, obj.type, this.canvas);
+				}
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
@@ -333,8 +339,8 @@ class MercuryInterpreter {
 
 		// when all loops started fade in the new sounds and fade out old
 		// if (!this.sounds.length){
-			// 	this.startSounds(this.sounds);
-			// }
+		// 	this.startSounds(this.sounds);
+		// }
 		this.removeSounds(this._sounds, this.crossFade);
 		this.startSounds(this.sounds);
 

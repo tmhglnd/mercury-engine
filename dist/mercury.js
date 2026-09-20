@@ -16532,7 +16532,7 @@ const WorkletDelay = function(_params) {
 	}
 }
 
-},{"./Util.js":67,"tone":44,"total-serialism":47}],57:[function(require,module,exports){
+},{"./Util.js":68,"tone":44,"total-serialism":47}],57:[function(require,module,exports){
 const Tone = require('tone');
 const { toArray, getParam, isRandom, atodb, msToS, divToS, log } = require('./Util.js');
 const fxMap = require('./Effects.js');
@@ -16777,7 +16777,160 @@ class Instrument extends Sequencer {
 	}
 }
 module.exports = Instrument;
-},{"./Effects.js":56,"./Sequencer.js":66,"./Util.js":67,"tone":44}],58:[function(require,module,exports){
+},{"./Effects.js":56,"./Sequencer.js":67,"./Util.js":68,"tone":44}],58:[function(require,module,exports){
+const Tone = require("tone");
+const Instrument = require("./Instrument");
+const { getParam, toMidi, mtof, setWorkletParam, toArray, divToS } = require("./Util");
+
+class MonoFM extends Instrument {
+	constructor(engine, t='fm', canvas, line){
+		// inherit from Instrument class
+		super(engine, canvas, line);
+
+		// synth specific parameters
+		this._note = [ 0, 0 ];
+		this._slide = [ 0 ];
+		this._firstSlide = true;
+		this._harm = [2];
+		this._indx = [2];
+		this._voices = [1];
+		this._detune = [0];
+
+		this.createSource();
+
+		console.log('=> MonoFM()', this);
+	}
+
+	createSource(){
+		// the source connects to the channelstrip
+		this.source = new Tone.ToneAudioNode();
+		this.source.workletNode = Tone.getContext().createAudioWorkletNode('fm-processor');
+		this.source.output = new Tone.Gain();
+		// connect to the input of the output gain node
+		this.source.workletNode.connect(this.source.output.input);
+		// connect to the channelstrip
+		this.source.connect(this.channelStrip());
+		// functions to set/ramp the parameter in a workletnode
+		this.source.setParam = (p, v, t) => {
+			setWorkletParam(this.source, p, v, t);
+		}
+		// method to dispose the workletProcessor
+		this.source.stop = () => { 
+			this.source.workletNode.port.postMessage('dispose'); 
+		}
+		// a Signal as envelope for the FM modulator
+		this.fmASR = new Tone.Signal(0, 'gain');
+		this.fmASR.connect(this.source.workletNode.parameters.get('modAmp'));
+
+		this.fmFreq = new Tone.Signal(0, 'frequency');
+		this.fmFreq.connect(this.source.workletNode.parameters.get('frequency'))
+	}
+
+	sourceEvent(c, e, time){
+		// get the harmonicity and modulation index
+		const h = getParam(this._harm, c);
+		this.source.setParam('harmonicity', h, time);
+
+		const d = getParam(this._indx, c);
+		this.source.setParam('index', d, time);
+		// get the voices and detune amount for unison
+		const v = getParam(this._voices, c);
+		this.source.setParam('voices', v, time);
+
+		const t = getParam(this._detune, c);
+		this.source.setParam('detune', t, time);
+
+		// get the interval and octave, calculate the note
+		// calculate the frequency based on the note
+		const i = getParam(this._note[0], c);
+		const o = getParam(this._note[1], c);
+		const n = toMidi(i, o);
+		const f = mtof(n);
+
+		// get the slide time for next note and set the frequency
+		const s = divToS(getParam(this._slide, c), this.bpm());
+		if (s > 0 && !this._firstSlide){
+			this.fmFreq.rampTo(f, s, time);
+		} else {
+			this.fmFreq.setValueAtTime(f, time);
+		}
+		// first time the synth plays don't slide!
+		this._firstSlide = false;
+
+		// apply an envelope to the modulator
+		if (this._fmA){
+			const atk = Math.max(divToS(getParam(this._fmA, c), this.bpm()), 0.001);
+			const sus = Math.max(divToS(getParam(this._fmS, c), this.bpm()), 0.001);
+			const rel = Math.max(divToS(getParam(this._fmR, c), this.bpm()), 0.001);
+
+			// schedule the attack of the envelope
+			this.fmASR.linearRampTo(1, atk, time);
+			// schedule the release of the envelope after attack and sustain
+			this.fmASR.linearRampTo(0, rel, time + atk + sus);
+		} else {
+			// when the shape is 'off' set to 1
+			// this.fmASR.setValueAtTime(1, time);
+			this.fmASR.linearRampTo(1, 0.005, time);
+		}
+	}
+
+	harmonicity(h=[2]){
+		// the harmonicity determines the modulation 
+		// frequency, as a list of ratios
+		this._harm = toArray(h);
+	}
+	ratio = this.harmonicity;
+
+	index(i=[2]){
+		// the index determines the modulation depth
+		this._indx = toArray(i);
+	}
+	depth = this.index;
+
+	super(v=[3], d=[0.111]){
+		// add unison voices and detune them with a spread
+		this._voices = toArray(v);
+		this._detune = toArray(d);
+	}
+	unison = this.super;
+
+	slide(s){
+		// glide from one note to another
+		this._slide = toArray(s);
+	}
+
+	fmShape(...e){
+		console.log('fmshape', e);
+		// set the attack/sustain/release times for modulator
+		this._fmA = this._fmS = this._fmR = [0];
+
+		if (e[0] === 'off' || e[0] < 0){
+			this._fmA = null;
+		} else {
+			switch(e.length){
+				case 1: 
+					this._fmA = [1]; 
+					this._fmR = toArray(e[0]); break;
+				case 2:
+					this._fmA = toArray(e[0]);
+					this._fmR = toArray(e[1]); break;
+				default:
+					this._fmA = toArray(e[0]);
+					this._fmS = toArray(e[1]);
+					this._fmR = toArray(e[2]); break;
+			}
+		}
+	}
+
+	wave2(){} //placeholder 
+
+	delete(){
+		super.delete();
+		console.log('disposed MonoFM()');
+	}
+}
+module.exports = MonoFM;
+},{"./Instrument":57,"./Util":68,"tone":44}],59:[function(require,module,exports){
 const Tone = require('tone');
 const Instrument = require('./Instrument.js');
 const { log } = require('./Util.js');
@@ -16827,7 +16980,7 @@ class MonoInput extends Instrument {
 	}
 }
 module.exports = MonoInput;
-},{"./Instrument.js":57,"./Util.js":67,"tone":44}],59:[function(require,module,exports){
+},{"./Instrument.js":57,"./Util.js":68,"tone":44}],60:[function(require,module,exports){
 const Tone = require('tone');
 const { getParam, divToS, log, lookup, toArray, toMidi } = require('./Util.js');
 const Sequencer = require('./Sequencer.js');
@@ -17008,7 +17161,7 @@ class MonoMidi extends Sequencer {
 	}
 }
 module.exports = MonoMidi;
-},{"./Sequencer.js":66,"./Util.js":67,"tone":44,"webmidi":55}],60:[function(require,module,exports){
+},{"./Sequencer.js":67,"./Util.js":68,"tone":44,"webmidi":55}],61:[function(require,module,exports){
 const Tone = require('tone');
 const Instrument = require('./Instrument.js');
 const { toArray, getParam, clip, log } = require('./Util.js');
@@ -17104,7 +17257,7 @@ class MonoNoise extends Instrument {
 	}
 }
 module.exports = MonoNoise;
-},{"./Instrument.js":57,"./Util.js":67,"tone":44}],61:[function(require,module,exports){
+},{"./Instrument.js":57,"./Util.js":68,"tone":44}],62:[function(require,module,exports){
 const Tone = require('tone');
 const { log, getParam, toMidi, lookup, toArray } = require('./Util.js');
 const { mtof, noteToMidi } = require('./Util.js');
@@ -17157,6 +17310,8 @@ class MonoSample extends Instrument {
 				// default sample if file does not exist
 				log(`${f} is not a loaded sample and not part of the default samplepack`);
 			}
+			// don't play if there is no valid buffer loaded
+			return;
 		} else {
 			this.sample.buffer = this._bufs.get(f);
 		}
@@ -17271,7 +17426,7 @@ class MonoSample extends Instrument {
 	}
 }
 module.exports = MonoSample;
-},{"./Instrument.js":57,"./Util.js":67,"tone":44}],62:[function(require,module,exports){
+},{"./Instrument.js":57,"./Util.js":68,"tone":44}],63:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
 // const fxMap = require('./Effects.js');
@@ -17391,13 +17546,10 @@ class MonoSynth extends Instrument {
 	}
 }
 module.exports = MonoSynth;
-},{"./Instrument":57,"./Util.js":67,"tone":44,"total-serialism":47}],63:[function(require,module,exports){
+},{"./Instrument":57,"./Util.js":68,"tone":44,"total-serialism":47}],64:[function(require,module,exports){
 const Tone = require('tone');
-const Util = require('./Util.js');
+const { toArray, getParam, isRandom, lookup, divToS } = require('./Util.js');
 const Instrument = require('./Instrument.js');
-// const fxMap = require('./Effects.js');
-// const TL = require('total-serialism').Translate;
-// const Sequencer = require('./Sequencer.js');
 
 // Basic class for a poly-instrument
 class PolyInstrument extends Instrument {
@@ -17422,12 +17574,12 @@ class PolyInstrument extends Instrument {
 	}
 
 	channelStrip(){
-		// gain => output
-		this.gain = new Tone.Gain(0).toDestination();
+		// gain => output (for fade-in/out from evaluation)
+		this.gain = new Tone.Gain(0, 'normalRange').toDestination();
 		// postfx-gain => gain (for gain() function in instrument)
 		this.post = new Tone.Gain(1, "gain").connect(this.gain);
 		// panning => gain
-		this.panner = new Tone.Panner(0).connect(this.post);
+		this.panner = new Tone.Panner(0).connect(this.gain);
 		// adsr => panning
 		// done through createVoices
 	}
@@ -17453,8 +17605,8 @@ class PolyInstrument extends Instrument {
 		}
 		
 		// set panning
-		let p = Util.getParam(this._pan, c);
-		p = Util.isRandom(p, -1, 1);
+		let p = getParam(this._pan, c);
+		p = isRandom(p, -1, 1);
 		this.panner.pan.setValueAtTime(p, time);
 
 		// use notes from array to trigger multiple voices
@@ -17486,7 +17638,7 @@ class PolyInstrument extends Instrument {
 
 		// get the notes from the note array to know how many voices
 		// need to be triggered at once
-		let notes = Util.toArray(Util.lookup(this._note[0], c));
+		let notes = toArray(lookup(this._note[0], c));
 		// console.log('notes to trigger', notes);
 
 		for (let n=0; n<notes.length; n++){
@@ -17506,9 +17658,9 @@ class PolyInstrument extends Instrument {
 				
 				// set shape for playback (fade-in / out and length)
 				if (this._att){
-					const att = Math.max(Util.divToS(Util.lookup(this._att, c), this.bpm()), 0.001);
-					const dec = Util.divToS(Util.lookup(this._sus, c), this.bpm());
-					const rel = Math.max(Util.divToS(Util.lookup(this._rel, c), this.bpm()), 0.001);
+					const att = Math.max(divToS(lookup(this._att, c), this.bpm()), 0.001);
+					const dec = Math.max(divToS(lookup(this._sus, c), this.bpm()), 0);
+					const rel = Math.max(divToS(lookup(this._rel, c), this.bpm()), 0.001);
 		
 					// short ramp for retrigger, fades out the envelope over 
 					// 2 ms. use the retrigger time to schedule the event
@@ -17523,19 +17675,19 @@ class PolyInstrument extends Instrument {
 					this.adsrs[i].gain.linearRampTo(1.0, att, time + retrigger);
 					this.adsrs[i].gain.exponentialRampTo(0.0, rel * 5, time + att + dec + retrigger);
 				} else {
-					// if shape is off only trigger attack
+					// if shape is off only trigger attack.
 					// when voice stealing is 'off' this will lead to all 
 					// voices set to busy!
 					// if shape is 'off' turn on the gain of the envelope
-					this.adsrs[i].gain.setValueAtTime(1.0, time);
+					// this.adsrs[i].gain.setValueAtTime(1.0, time);
+					this.adsrs[i].gain.linearRampTo(1.0, 0.005, time);
 				}
-		
 			}
 		}
 	}
 
 	voices(v){
-		Util.log(`Changing voice amount is not yet supported. You can use voice-stealing with steal(on)`);
+		log(`Changing voice amount is not yet supported. You can use voice-stealing with steal(on)`);
 		// TODO change voice amount
 		// set the voiceamount for the polyphonic synth
 		// this.numVoices = Math.max(1, isNaN(Number(v))? 6 : Number(v));
@@ -17550,7 +17702,7 @@ class PolyInstrument extends Instrument {
 		} else if (s === 'off' || s == 0){
 			this._steal = false;
 		} else {
-			Util.log(`${s} is not a valid argument for steal()`);
+			log(`${s} is not a valid argument for steal()`);
 		}
 	}
 
@@ -17560,6 +17712,10 @@ class PolyInstrument extends Instrument {
 		// disconnect the sound dispose the player
 		this.gain.disconnect();
 		this.gain.dispose();
+
+		this.post.disconnect();
+		this.post.dispose();
+
 		this.panner.disconnect();
 		this.panner.dispose();
 
@@ -17578,9 +17734,11 @@ class PolyInstrument extends Instrument {
 	}
 }
 module.exports = PolyInstrument;
-},{"./Instrument.js":57,"./Util.js":67,"tone":44}],64:[function(require,module,exports){
+},{"./Instrument.js":57,"./Util.js":68,"tone":44}],65:[function(require,module,exports){
 const Tone = require('tone');
-const Util = require('./Util.js');
+// const Util = require('./Util.js');
+const { toArray, getParam, lookup, msToS } = require('./Util.js');
+const { mtof, toMidi, noteToMidi } = require('./Util.js');
 const PolyInstrument = require('./PolyInstrument.js');
 
 class PolySample extends PolyInstrument {
@@ -17622,47 +17780,61 @@ class PolySample extends PolyInstrument {
 
 	sourceEvent(c, time, id, num){
 		// ramp volume
-		let g = 20 * Math.log(Util.getParam(this._gain[0], c) * 0.707);
-		let r = Util.msToS(Math.max(0, Util.getParam(this._gain[1], c)));
+		let g = 20 * Math.log(getParam(this._gain[0], c) * 0.707);
+		let r = msToS(Math.max(0, getParam(this._gain[1], c)));
 		this.sources[id].volume.rampTo(g, r, time);
 
 
-		// let o = Util.getParam(this._note[1], c);
-		// let i = Util.getParam(this._note[0], c);
-		// let i = Util.toArray(Util.lookup(this._note[0], c))[num];
-		// let f = Util.noteToFreq(i, o);
+		// let o = getParam(this._note[1], c);
+		// let i = getParam(this._note[0], c);
+		// let i = toArray(lookup(this._note[0], c))[num];
+		// let f = noteToFreq(i, o);
 
 		// get the sample from array
-		let b = Util.getParam(this._sound, c);
+		let b = getParam(this._sound, c);
 
 		if (this.sources[id].buffer){
 			// clean-up previous buffer
 			this.sources[id].buffer.dispose();
 		}
-		if (this._bufs.has(b)){	
-			this.sources[id].buffer = this._bufs.get(b);
+
+		// if (this._bufs.has(b)){	
+		// 	this.sources[id].buffer = this._bufs.get(b);
+		// } else {
+		// 	// default sample if file does not exist
+		// 	this.sources[id].buffer = this._bufs.get('kick_909');
+		// }
+
+		if (!this._bufs.has(b)){
+			if (this._defaults[b]){
+				this._engine.addBufferFromUrl(this._defaults[b], b);
+			} else {
+				log(`${b} is not a loaded sample and not part of the default samplepack`);
+			}
+			// don't play if there is no valid buffer loaded
+			return;
 		} else {
-			// default sample if file does not exist
-			this.sources[id].buffer = this._bufs.get('kick_909');
+			this.sources[id].buffer = this._bufs.get(b);
 		}
+
 		// the duration of the buffer in seconds
 		let dur = this.sources[id].buffer.duration;
 
 		// get speed and if 2d array pick randomly
-		let s = Util.getParam(this._speed, c);
+		let s = getParam(this._speed, c);
 
 		// set the playbackrate based on the selected note
 		// note as interval / octave coordinate
 		// check if note is not 'off'
-		let i = Util.toArray(Util.lookup(this._note[0], c))[num];
+		let i = toArray(lookup(this._note[0], c))[num];
 		if (i !== 'off'){
 			// note as interval / octave coordinate
-			let o = Util.getParam(this._note[1], c);
-			let t = Util.getParam(this._tune, c);
+			let o = getParam(this._note[1], c);
+			let t = getParam(this._tune, c);
 
 			// reconstruct midi note value with scale, (0, 0) = 36
-			let n = Util.toMidi(i, o);
-			let r = Util.mtof(n) / t;
+			let n = toMidi(i, o);
+			let r = mtof(n) / t;
 			s = s * r;
 		}
 
@@ -17671,7 +17843,7 @@ class PolySample extends PolyInstrument {
 		// it becomes normal playback again) no fix yet
 		// this.sample.reverse = s < 0.0;
 
-		let l = Util.lookup(this._stretch, c);
+		let l = lookup(this._stretch, c);
 		let n = 1;
 		if (l){
 			n = dur / (60 * 4 / this.bpm()) / l;
@@ -17680,7 +17852,7 @@ class PolySample extends PolyInstrument {
 		this.sources[id].playbackRate = Math.max(Math.abs(s) * n, 0.0001);
 
 		// get the start position
-		let p = dur * Util.getParam(this._pos, c);
+		let p = dur * getParam(this._pos, c);
 
 		// when sample is loaded allow playback to start
 		if (this.sources[id].loaded){
@@ -17690,58 +17862,59 @@ class PolySample extends PolyInstrument {
 
 	sound(s){
 		// load all soundfiles and return as array
-		this._sound = this.checkBuffer(Util.toArray(s));
+		// this._sound = this.checkBuffer(toArray(s));
+		this._sound = toArray(s);
 	}
 
-	checkBuffer(a){
-		// check if file is part of the loaded samples
-		return a.map((s) => {
-			if (Array.isArray(s)) {
-				return this.checkBuffer(s);
-			}
-			// error if soundfile does not exist
-			else if (!this._bufs.has(s)){
-				// set default (or an ampty soundfile?)
-				Util.log(`sample ${s} not found`);
-				return 'kick_909';
-			}
-			return s;
-		});
-	}
+	// checkBuffer(a){
+	// 	// check if file is part of the loaded samples
+	// 	return a.map((s) => {
+	// 		if (Array.isArray(s)) {
+	// 			return this.checkBuffer(s);
+	// 		}
+	// 		// error if soundfile does not exist
+	// 		else if (!this._bufs.has(s)){
+	// 			// set default (or an ampty soundfile?)
+	// 			log(`sample ${s} not found`);
+	// 			return 'kick_909';
+	// 		}
+	// 		return s;
+	// 	});
+	// }
 
 	note(i=0, o=0){
 		// set the note as semitone interval and octave offset
 		// (0, 0) = MidiNote 36
-		this._note = [Util.toArray(i), Util.toArray(o)];
+		this._note = [toArray(i), toArray(o)];
 	}
 
 	speed(s){
 		// set the speed pattern as an array
-		this._speed = Util.toArray(s);
+		this._speed = toArray(s);
 	}
 
 	tune(t=60){
 		// set the fundamental midi note for this sample in Hz, MIDI or Notename
-		this._tune = Util.toArray(t);
+		this._tune = toArray(t);
 		this._tune = this._tune.map((t) => {
 			if (typeof t === 'number'){
 				if (Math.floor(t) !== t){
 					return t;
 				}
-				return Util.mtof(t);
+				return mtof(t);
 			}
-			return Util.mtof(Util.noteToMidi(t));
+			return mtof(noteToMidi(t));
 		});
 	}
 
 	stretch(s){
 		// set the stretch loop bar length
-		this._stretch = Util.toArray(s);
+		this._stretch = toArray(s);
 	}
 
 	offset(o){
 		// set the playback start position as an array
-		this._pos = Util.toArray(o);
+		this._pos = toArray(o);
 	}
 
 	delete(){
@@ -17752,7 +17925,7 @@ class PolySample extends PolyInstrument {
 	}
 }
 module.exports = PolySample;
-},{"./PolyInstrument.js":63,"./Util.js":67,"tone":44}],65:[function(require,module,exports){
+},{"./PolyInstrument.js":64,"./Util.js":68,"tone":44}],66:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
 const PolyInstrument = require('./PolyInstrument');
@@ -17858,7 +18031,7 @@ class PolySynth extends PolyInstrument {
 	}
 }
 module.exports = PolySynth;
-},{"./PolyInstrument":63,"./Util.js":67,"tone":44}],66:[function(require,module,exports){
+},{"./PolyInstrument":64,"./Util.js":68,"tone":44}],67:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
 // const WebMidi = require("webmidi");
@@ -18133,7 +18306,7 @@ class Sequencer {
 	}
 }
 module.exports = Sequencer;
-},{"./Util.js":67,"tone":44}],67:[function(require,module,exports){
+},{"./Util.js":68,"tone":44}],68:[function(require,module,exports){
 const Tone = require('tone');
 const { scale } = require('total-serialism').Utility;
 const { noteToMidi, toScale, mtof } = require('total-serialism').Translate;
@@ -18492,7 +18665,7 @@ function log(msg){
 }
 
 module.exports = { mapDefaults, atTime, atodb, dbtoa, clip, fixNan, fixNonFinite, lookup, randLookup, isRandom, getParam, toArray, msToS, fractToFloat, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assertWave, assertLfoWave, remap, setWorkletParam, checkFiltertype, filtertypeIndex, lfoTimeCorrection, log }
-},{"tone":44,"total-serialism":47}],68:[function(require,module,exports){
+},{"tone":44,"total-serialism":47}],69:[function(require,module,exports){
 module.exports={
 	"uptempo" : 10,
 	"downtempo" : 10,
@@ -18513,7 +18686,7 @@ module.exports={
 	"dnb" : 170,
 	"neurofunk" : 180
 }
-},{}],69:[function(require,module,exports){
+},{}],70:[function(require,module,exports){
 
 // const Tone = require('tone');
 const Mercury = require('mercury-lang');
@@ -18530,6 +18703,7 @@ const PolySample = require('./core/PolySample.js');
 const Tempos = require('./data/genre-tempos.json');
 const Util = require('./core/Util.js');
 const { divToS } = require('./core/Util.js');
+const MonoFM = require('./core/MonoFM.js');
 
 class MercuryInterpreter {
 	constructor({ hydra, p5canvas } = {}){
@@ -18754,8 +18928,13 @@ class MercuryInterpreter {
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
-			'synth' : (obj) => {		
-				let inst = new MonoSynth(this, obj.type, this.canvas);
+			'synth' : (obj) => {
+				let inst;
+				if (obj.type === 'fm'){
+					inst = new MonoFM(this, obj.type, this.canvas);
+				} else {
+					inst = new MonoSynth(this, obj.type, this.canvas);
+				}
 				objectMap.applyFunctions(obj.functions, inst, obj.type);
 				return inst;
 			},
@@ -18849,8 +19028,8 @@ class MercuryInterpreter {
 
 		// when all loops started fade in the new sounds and fade out old
 		// if (!this.sounds.length){
-			// 	this.startSounds(this.sounds);
-			// }
+		// 	this.startSounds(this.sounds);
+		// }
 		this.removeSounds(this._sounds, this.crossFade);
 		this.startSounds(this.sounds);
 
@@ -18877,7 +19056,7 @@ class MercuryInterpreter {
 	}
 }
 module.exports = { MercuryInterpreter }
-},{"./core/MonoInput.js":58,"./core/MonoMidi.js":59,"./core/MonoNoise.js":60,"./core/MonoSample.js":61,"./core/MonoSynth.js":62,"./core/PolySample.js":64,"./core/PolySynth.js":65,"./core/Util.js":67,"./data/genre-tempos.json":68,"mercury-lang":27,"total-serialism":47}],70:[function(require,module,exports){
+},{"./core/MonoFM.js":58,"./core/MonoInput.js":59,"./core/MonoMidi.js":60,"./core/MonoNoise.js":61,"./core/MonoSample.js":62,"./core/MonoSynth.js":63,"./core/PolySample.js":65,"./core/PolySynth.js":66,"./core/Util.js":68,"./data/genre-tempos.json":69,"mercury-lang":27,"total-serialism":47}],71:[function(require,module,exports){
 
 console.log(`
 Mercury Engine by Timo Hoogland (c) 2018-2026
@@ -19236,5 +19415,5 @@ class Mercury extends MercuryInterpreter {
 	// }
 }
 module.exports = { Mercury };
-},{"./core/Util.js":67,"./interpreter":69,"tone":44,"webmidi":55}]},{},[70])(70)
+},{"./core/Util.js":68,"./interpreter":70,"tone":44,"webmidi":55}]},{},[71])(71)
 });

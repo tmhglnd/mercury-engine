@@ -1,5 +1,7 @@
 const Tone = require('tone');
-const Util = require('./Util.js');
+// const Util = require('./Util.js');
+const { toArray, getParam, lookup, msToS } = require('./Util.js');
+const { mtof, toMidi, noteToMidi } = require('./Util.js');
 const PolyInstrument = require('./PolyInstrument.js');
 
 class PolySample extends PolyInstrument {
@@ -41,47 +43,61 @@ class PolySample extends PolyInstrument {
 
 	sourceEvent(c, time, id, num){
 		// ramp volume
-		let g = 20 * Math.log(Util.getParam(this._gain[0], c) * 0.707);
-		let r = Util.msToS(Math.max(0, Util.getParam(this._gain[1], c)));
+		let g = 20 * Math.log(getParam(this._gain[0], c) * 0.707);
+		let r = msToS(Math.max(0, getParam(this._gain[1], c)));
 		this.sources[id].volume.rampTo(g, r, time);
 
 
-		// let o = Util.getParam(this._note[1], c);
-		// let i = Util.getParam(this._note[0], c);
-		// let i = Util.toArray(Util.lookup(this._note[0], c))[num];
-		// let f = Util.noteToFreq(i, o);
+		// let o = getParam(this._note[1], c);
+		// let i = getParam(this._note[0], c);
+		// let i = toArray(lookup(this._note[0], c))[num];
+		// let f = noteToFreq(i, o);
 
 		// get the sample from array
-		let b = Util.getParam(this._sound, c);
+		let b = getParam(this._sound, c);
 
 		if (this.sources[id].buffer){
 			// clean-up previous buffer
 			this.sources[id].buffer.dispose();
 		}
-		if (this._bufs.has(b)){	
-			this.sources[id].buffer = this._bufs.get(b);
+
+		// if (this._bufs.has(b)){	
+		// 	this.sources[id].buffer = this._bufs.get(b);
+		// } else {
+		// 	// default sample if file does not exist
+		// 	this.sources[id].buffer = this._bufs.get('kick_909');
+		// }
+
+		if (!this._bufs.has(b)){
+			if (this._defaults[b]){
+				this._engine.addBufferFromUrl(this._defaults[b], b);
+			} else {
+				log(`${b} is not a loaded sample and not part of the default samplepack`);
+			}
+			// don't play if there is no valid buffer loaded
+			return;
 		} else {
-			// default sample if file does not exist
-			this.sources[id].buffer = this._bufs.get('kick_909');
+			this.sources[id].buffer = this._bufs.get(b);
 		}
+
 		// the duration of the buffer in seconds
 		let dur = this.sources[id].buffer.duration;
 
 		// get speed and if 2d array pick randomly
-		let s = Util.getParam(this._speed, c);
+		let s = getParam(this._speed, c);
 
 		// set the playbackrate based on the selected note
 		// note as interval / octave coordinate
 		// check if note is not 'off'
-		let i = Util.toArray(Util.lookup(this._note[0], c))[num];
+		let i = toArray(lookup(this._note[0], c))[num];
 		if (i !== 'off'){
 			// note as interval / octave coordinate
-			let o = Util.getParam(this._note[1], c);
-			let t = Util.getParam(this._tune, c);
+			let o = getParam(this._note[1], c);
+			let t = getParam(this._tune, c);
 
 			// reconstruct midi note value with scale, (0, 0) = 36
-			let n = Util.toMidi(i, o);
-			let r = Util.mtof(n) / t;
+			let n = toMidi(i, o);
+			let r = mtof(n) / t;
 			s = s * r;
 		}
 
@@ -90,7 +106,7 @@ class PolySample extends PolyInstrument {
 		// it becomes normal playback again) no fix yet
 		// this.sample.reverse = s < 0.0;
 
-		let l = Util.lookup(this._stretch, c);
+		let l = lookup(this._stretch, c);
 		let n = 1;
 		if (l){
 			n = dur / (60 * 4 / this.bpm()) / l;
@@ -99,7 +115,7 @@ class PolySample extends PolyInstrument {
 		this.sources[id].playbackRate = Math.max(Math.abs(s) * n, 0.0001);
 
 		// get the start position
-		let p = dur * Util.getParam(this._pos, c);
+		let p = dur * getParam(this._pos, c);
 
 		// when sample is loaded allow playback to start
 		if (this.sources[id].loaded){
@@ -109,58 +125,59 @@ class PolySample extends PolyInstrument {
 
 	sound(s){
 		// load all soundfiles and return as array
-		this._sound = this.checkBuffer(Util.toArray(s));
+		// this._sound = this.checkBuffer(toArray(s));
+		this._sound = toArray(s);
 	}
 
-	checkBuffer(a){
-		// check if file is part of the loaded samples
-		return a.map((s) => {
-			if (Array.isArray(s)) {
-				return this.checkBuffer(s);
-			}
-			// error if soundfile does not exist
-			else if (!this._bufs.has(s)){
-				// set default (or an ampty soundfile?)
-				Util.log(`sample ${s} not found`);
-				return 'kick_909';
-			}
-			return s;
-		});
-	}
+	// checkBuffer(a){
+	// 	// check if file is part of the loaded samples
+	// 	return a.map((s) => {
+	// 		if (Array.isArray(s)) {
+	// 			return this.checkBuffer(s);
+	// 		}
+	// 		// error if soundfile does not exist
+	// 		else if (!this._bufs.has(s)){
+	// 			// set default (or an ampty soundfile?)
+	// 			log(`sample ${s} not found`);
+	// 			return 'kick_909';
+	// 		}
+	// 		return s;
+	// 	});
+	// }
 
 	note(i=0, o=0){
 		// set the note as semitone interval and octave offset
 		// (0, 0) = MidiNote 36
-		this._note = [Util.toArray(i), Util.toArray(o)];
+		this._note = [toArray(i), toArray(o)];
 	}
 
 	speed(s){
 		// set the speed pattern as an array
-		this._speed = Util.toArray(s);
+		this._speed = toArray(s);
 	}
 
 	tune(t=60){
 		// set the fundamental midi note for this sample in Hz, MIDI or Notename
-		this._tune = Util.toArray(t);
+		this._tune = toArray(t);
 		this._tune = this._tune.map((t) => {
 			if (typeof t === 'number'){
 				if (Math.floor(t) !== t){
 					return t;
 				}
-				return Util.mtof(t);
+				return mtof(t);
 			}
-			return Util.mtof(Util.noteToMidi(t));
+			return mtof(noteToMidi(t));
 		});
 	}
 
 	stretch(s){
 		// set the stretch loop bar length
-		this._stretch = Util.toArray(s);
+		this._stretch = toArray(s);
 	}
 
 	offset(o){
 		// set the playback start position as an array
-		this._pos = Util.toArray(o);
+		this._pos = toArray(o);
 	}
 
 	delete(){

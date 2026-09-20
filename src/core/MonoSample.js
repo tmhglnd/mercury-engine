@@ -50,6 +50,8 @@ class MonoSample extends Instrument {
 				// default sample if file does not exist
 				log(`${f} is not a loaded sample and not part of the default samplepack`);
 			}
+			// don't play if there is no valid buffer loaded
+			return;
 		} else {
 			this.sample.buffer = this._bufs.get(f);
 		}
