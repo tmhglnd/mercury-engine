@@ -12,8 +12,7 @@ const MonoInput = require('./core/MonoInput.js');
 const PolySynth = require('./core/PolySynth.js');
 const PolySample = require('./core/PolySample.js');
 const Tempos = require('./data/genre-tempos.json');
-const Util = require('./core/Util.js');
-const { divToS } = require('./core/Util.js');
+const { log, divToS } = require('./core/Util.js');
 const MonoFM = require('./core/MonoFM.js');
 
 class MercuryInterpreter {
@@ -94,13 +93,13 @@ class MercuryInterpreter {
 		// set the crossFade time in milliseconds
 		this.crossFade = divToS(f, this.getBPM());
 		// this.crossFade = Number(f) / 1000;
-		Util.log(`crossFade is deprecated, setting fadeOut time to ${this.crossFade}ms`);
+		log(`crossFade is deprecated, setting fadeOut time to ${this.crossFade}ms`);
 	}
 
 	setFadeOut(f){
 		// set the fadeOut time in milliseconds
 		this.crossFade = divToS(f, this.getBPM());
-		Util.log(`setting fadeOut time to ${this.crossFade}`);
+		log(`setting fadeOut time to ${this.crossFade}`);
 	}
 
 	getCode(){
@@ -111,18 +110,11 @@ class MercuryInterpreter {
 	code(file=''){
 		// is not silenced initially
 		this.silenced = false;
-
 		// parse and evaluate the inputted code
 		let c = (!file)? this._code : file;
-		
+
 		let t = window.performance.now();
 				
-		// is this necessary?
-		// as an asyncronous function with promise
-		// let parser = new Promise((resolve) => {
-		// 	return resolve(Mercury(c));
-		// });
-		// this.parse = await parser;
 		this.parse = Mercury(c);
 		
 		console.log(`Evaluated code in: ${(window.performance.now() - t).toFixed(1)}ms`);
@@ -130,16 +122,14 @@ class MercuryInterpreter {
 		this.tree = this.parse.parseTree;
 		this.errors = this.parse.errors;
 
-		// let l = document.getElementById('console-log');
-		// l.innerHTML = '';
 		// handle .print and .errors
 		this.errors.forEach((e) => {
-			Util.log(e);
+			log(e);
 		});
 		if (this.errors.length > 0){
 			// return if the code contains any syntax errors
-			Util.log(`Could not run because of syntax error`);
-			Util.log(`Please see Help for more information`);
+			log(`Could not run because of syntax error`);
+			log(`Please see Help for more information`);
 			// return the parsetree also if there are errors
 			return this.parse;
 		}
@@ -147,7 +137,7 @@ class MercuryInterpreter {
 		this._code = c;
 
 		this.tree.print.forEach((p) => {
-			Util.log(p);
+			log(p);
 		});
 
 		// set timer to check evaluation time
@@ -168,7 +158,7 @@ class MercuryInterpreter {
 				if (isNaN(t)){
 					t = Tempos[args[0].toLowerCase()];
 					if (t === undefined){
-						Util.log(`tempo ${args[0]} is not a valid genre or number`);
+						log(`tempo ${args[0]} is not a valid genre or number`);
 						return;
 					}
 					args[0] = t;
@@ -187,7 +177,7 @@ class MercuryInterpreter {
 				let scl = Array.isArray(args[0])? args[0][0] : args[0];
 				let rt = Array.isArray(args[1])? args[1][0] : args[1];
 	
-				if (scl.match(/(none|null|off)/)){
+				if (scl.match(/(none|null|off|default)/)){
 					TL.setScale('chromatic');
 					TL.setRoot('c');
 					// document.getElementById('scale').innerHTML = '';
@@ -197,7 +187,7 @@ class MercuryInterpreter {
 				if (s.indexOf(scl) > -1){
 					TL.setScale(scl);
 				} else {
-					Util.log(`${scl} is not a valid scale`);
+					log(`${scl} is not a valid scale`);
 				}
 				if (rt){
 					TL.setRoot(rt);
@@ -205,7 +195,7 @@ class MercuryInterpreter {
 				// let tmpS = TL.getScale().scale;
 				// let tmpR = TL.getScale().root;
 				// document.getElementById('scale').innerHTML = `scale = ${tmpR} ${tmpS}`;
-				// Util.log(`set scale to ${tmpR} ${tmpS}`);
+				// log(`set scale to ${tmpR} ${tmpS}`);
 			},
 			'amp' : (args) => {
 				this.setVolume(...args);
@@ -220,10 +210,15 @@ class MercuryInterpreter {
 				// engine.setLowPass(...args);
 			},
 			'samples' : (args) => {
-				// load samples in the audiobuffer
-				// this can be a single url to a soundfile
-				// or a url to a folder that will be searched through
-				this.addBuffers(args);
+				// if the argument is "default", load all the default samples
+				if (args[0] === 'default'){
+					this.addDefaultSamples();
+				} else {
+					// load samples in the audiobuffer
+					// this can be a single url to a soundfile
+					// or a url to a folder that will be searched through
+					this.addBuffers(args);
+				}
 			}
 		}
 
@@ -266,7 +261,7 @@ class MercuryInterpreter {
 			},
 			'midi' : (obj) => {
 				if (!this.midi.enabled){
-					Util.log(`WebMIDI is not started. Please load the package and check your browser compatibility`);
+					log(`WebMIDI is not started. Please load the package and check your browser compatibility`);
 					return null;
 				}
 				let inst = new MonoMidi(this, obj.type, this.canvas);
@@ -315,7 +310,7 @@ class MercuryInterpreter {
 			if (objectMap[type]){
 				this.sounds.push(objectMap[type](this.tree.objects[o]));
 			} else {
-				Util.log(`Instrument named '${type}' is not supported`);
+				log(`Instrument named '${type}' is not supported`);
 			}
 		}
 

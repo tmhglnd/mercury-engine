@@ -50,9 +50,15 @@ class Mercury extends MercuryInterpreter {
 		// an RMS meter for reactive visuals
 		this.meter;
 
-		// a recorder for the sound
-		this.recorder = new Tone.Recorder({ mimeType: 'audio/webm' });
-		this.gain.connect(this.recorder);
+		// create a Tone Recording and connect to the final output Node
+		// skip when Running in the Safari browser
+		this.isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+		console.log('Is running safari?', this.isSafari);
+
+		this.recorder = this.isSafari ? null : new Tone.Recorder({ mimeType: 'audio/webm' });
+		if (this.recorder){
+			this.gain.connect(this.recorder);
+		}
 
 		// default settings
 		this.setBPM(100);
@@ -309,6 +315,10 @@ class Mercury extends MercuryInterpreter {
 	// default starts recording, a false/0 stops recording
 	// optionally add a filename to the downloading file
 	async record(start=true, file='recoring'){
+		if (this.isSafari){
+			log('Recording not supported by Safari Browser');
+			return;
+		}
 		try {
 			if (start){
 				// star the recording
