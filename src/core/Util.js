@@ -355,4 +355,4 @@ function log(msg){
 	}
 }
 
-module.exports = { mapDefaults, atTime, atodb, dbtoa, clip, fixNaN, fixNonFinite, lookup, randLookup, isRandom, getParam, toArray, msToS, fractToFloat, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assertWave, assertLfoWave, remap, setWorkletParam, checkFiltertype, filtertypeIndex, lfoTimeCorrection, log }
+module.exports = { mapDefaults, atTime, atodb, dbtoa, clip, fixNan, fixNonFinite, lookup, randLookup, isRandom, getParam, toArray, msToS, fractToFloat, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assertWave, assertLfoWave, remap, setWorkletParam, checkFiltertype, filtertypeIndex, lfoTimeCorrection, log }

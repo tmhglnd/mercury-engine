@@ -1,4 +1,3 @@
-const { Delay } = require("tone");
 
 // Constants for calculations
 const MAX_DEF = +340282346638528859811704183484516925440;

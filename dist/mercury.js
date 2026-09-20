@@ -15451,8 +15451,14 @@ static toNoteNumber(e,t=0){if(t=null==t?0:parseInt(t),isNaN(t))throw new RangeEr
 }).call(this)}).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{"_process":35}],56:[function(require,module,exports){
 const Tone = require('tone');
-const Util = require('./Util.js');
 const TL = require('total-serialism').Translate;
+const Util = require('./Util.js');
+const { getParam, mapDefaults, toArray, atTime } = require('./Util.js');
+const { clip, divToS, fractToFloat } = require('./Util.js');
+const { fixNan, fixNonFinite } = require('./Util.js');
+const { checkFiltertype, filtertypeIndex } = require('./Util.js');
+const { assertLfoWave, lfoTimeCorrection } = require('./Util.js');
+const { toMidi, mtof, divToF, remap } = require('./Util.js');
 
 // all the available effects
 const fxMap = {
@@ -15523,6 +15529,13 @@ const fxMap = {
 	// 	return new PitchShift(params);
 	// },
 	'filter' : (params) => {
+		if (params.length < 4){
+			return new SVF(params);
+		} else {
+			return new AutoSVF(params);
+		}
+	},
+	'oldFilter' : (params) => {
 		return new Filter(params);
 	},
 	'triggerFilter' : (params) => {
@@ -15531,17 +15544,17 @@ const fxMap = {
 	'envFilter' : (params) => {
 		return new TriggerFilter(params);
 	},
-	/*'autoFilter' : (params) => {
-		return new AutoFilter(params);
+	'autoFilter' : (params) => {
+		return new AutoSVF(params);
 	},
 	'wobble' : (params) => {
-		return fxMap.autoFilter(params);
-	},*/
+		return new AutoSVF(params);
+	},
 	'delay' : (params) => {
-		return new Delay(params);
+		return new WorkletDelay(params);
 	},
 	'echo' : (params) => {
-		return new Delay(params);
+		return new WorkletDelay(params);
 	},
 	// 'ppDelay' : (params) => {
 	// 	return new PingPongDelay(params);
@@ -15550,10 +15563,10 @@ const fxMap = {
 	// 	return new FreeVerb(params);
 	// },
 	'chorus' : (params) => {
-		return new Chorus(Util.mapDefaults(params, ['4/1', 45, 0.5]));
+		return new Chorus(mapDefaults(params, ['4/1', 45, 0.5]));
 	},
 	'double' : (params) => {
-		return new Chorus(Util.mapDefaults(params, ['8/1', 8, 1]));
+		return new Chorus(mapDefaults(params, ['8/1', 8, 1]));
 	},
 	'vowel' : (params) => {
 		return new FormantFilter(params);
@@ -15563,19 +15576,51 @@ const fxMap = {
 	},
 	'speak' : (params) => {
 		return new FormantFilter(params);
+	},
+	'loss' : (params) => {
+		return new WaveLoss(params);
+	},
+	'waveloss' : (params) => {
+		return new WaveLoss(params);
 	}
 }
 module.exports = fxMap;
 
+const workletFX = function(fx){
+	// ToneAudioNode has all the tone effect parameters
+	const _fx = new Tone.ToneAudioNode();
+	// A gain node for connecting with input and output
+	_fx.input = new Tone.Gain(1);
+	_fx.output = new Tone.Gain(1);
+	// the fx processor
+	_fx.workletNode = new Tone.getContext().createAudioWorkletNode(fx);
+	// connect input, fx and output
+	_fx.input.chain(_fx.workletNode, _fx.output);
+	// create a dispose function
+	_fx.disposeWorklet = () => { 
+		_fx.workletNode.port.postMessage('dispose');
+	}
+	// send a reference back
+	return _fx;
+}
+
+// Helper functions
+
+// Set a parameter in an worklet processor
+const setParam = function(node, param, value, time) {
+	const p = node.workletNode.parameters.get(param);
+	p.setValueAtTime(value, time ?? Tone.now());
+}
+
 // Dispose a array of nodes
-//
-function disposeNodes(nodes=[]) {
+const disposeNodes = function(nodes=[]) {
 	nodes.forEach((n) => {
 		n?.disconnect();
 		n?.dispose();
 	});
 }
 
+// FeedbackLowpassCombFilter (LBCF) FX
 // A Lowpass Feedback CombFiltering effect
 // Adds a short feedback delay to the sound based on a specific note
 // resulting in a tonal output, like the resonating sound of a string 
@@ -15584,44 +15629,32 @@ function disposeNodes(nodes=[]) {
 //
 const CombFilter = function(_params) {
 	// the default parameters
-	_params = Util.mapDefaults(_params, [0, 0.8, 0.5, 0.5]);
-	this._pitch = Util.toArray(_params[0]);
-	this._fback = Util.toArray(_params[1]);
-	this._damp = Util.toArray(_params[2]);
-	this._wet = Util.toArray(_params[3]);
+	_params = mapDefaults(_params, [0, 0.8, 0.5, 0.5]);
+	this._pitch = _params[0];
+	this._fback = _params[1];
+	this._damp = _params[2];
+	this._wet = _params[3];
 
-	// ToneAudioNode has all the tone effect parameters
-	this._fx = new Tone.ToneAudioNode();
-
-	// A gain node for connecting with input and output
-	this._fx.input = new Tone.Gain(1);
-	this._fx.output = new Tone.Gain(1);
-	// the fx processor
-	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('combfilter-processor');
-	// connect input, fx and output
-	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+	// load a worklet FX in a ToneAudioNode
+	this._fx = workletFX('combfilter-processor');
 
 	this.set = (count, time, bpm) => {
-		const pitch = Util.toMidi(Util.getParam(this._pitch, count));
-		const _dt = 1000 / Util.mtof(pitch);
+		const pitch = toMidi(getParam(this._pitch, count));
+		const _dt = 1000 / mtof(pitch);
 		
 		// some mapping for the feedback to make it logarithmic in length
-		let _fb = Util.getParam(this._fback, count);
+		let _fb = getParam(this._fback, count);
 		let sign = _fb < 0 ? -1 : 1;
-		_fb = Util.clip(Math.pow(Math.abs(_fb), 0.1) * sign, -0.999, 0.999);
+		_fb = clip(Math.pow(Math.abs(_fb), 0.1) * sign, -0.999, 0.999);
 
-		const _dm = Util.clip(Util.getParam(this._damp, count));
-		const _dw = Util.clip(Util.getParam(this._wet, count));
+		const _dm = clip(getParam(this._damp, count));
+		const _dw = clip(getParam(this._wet, count));
 		
-		// get parameters from workletprocessor
-		const dt = this._fx.workletNode.parameters.get('time');	
-		dt.setValueAtTime(_dt, time);
-		const fb = this._fx.workletNode.parameters.get('feedback');	
-		fb.setValueAtTime(_fb, time);
-		const dm = this._fx.workletNode.parameters.get('damping');	
-		dm.setValueAtTime(_dm, time);
-		const dw = this._fx.workletNode.parameters.get('drywet');	
-		dw.setValueAtTime(_dw, time);
+		// set parameters for workletprocessor
+		setParam(this._fx, 'time', _dt, time);
+		setParam(this._fx, 'feedback', _fb, time);
+		setParam(this._fx, 'damping', _dm, time);
+		setParam(this._fx, 'drywet', _dw, time);
 	}
 
 	this.chain = () => {
@@ -15629,7 +15662,8 @@ const CombFilter = function(_params) {
 	}
 
 	this.delete = () => {
-		disposeNodes([this._fx.input, this._fx.output, this._fx]);
+		this._fx.workletNode.port.postMessage('dispose');
+		disposeNodes([ this._fx.input, this._fx.output, this._fx ]);
 	}
 }
 
@@ -15734,167 +15768,145 @@ const FormantFilter = function(_params){
 	}
 }
 
+// Downsampling FX
 // A Downsampling Chiptune effect. Downsamples the signal by a specified amount
 // Resulting in a lower samplerate, making it sound more like 8bit/chiptune
 // Programmed with a custom AudioWorkletProcessor, see effects/Processors.js
 //
 const DownSampler = function(_params){
 	// apply the default values and convert to arrays where necessary
-	_params = Util.mapDefaults(_params, [ 0.5, 1 ]);
-	this._down = Util.toArray(_params[0]);
-	this._wet = Util.toArray(_params[1]);
-	
-	// ToneAudioNode has all the tone effect parameters
-	this._fx = new Tone.ToneAudioNode();
+	_params = mapDefaults(_params, [ 0.5, 1 ]);
+	this._down = _params[0];
+	this._wet = _params[1];
 
-	// The crossfader mix
-	this._mix = new Tone.Add();
-	this._mixDry = new Tone.Gain(0).connect(this._mix.input);
-	// this._mixWet = new Tone.Gain(0.5).connect(this._mix.addend);
-	
-	// A gain node for connecting with input and output
-	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
-	this._fx.output = new Tone.Gain(1).connect(this._mix.addend);
-
-	// the fx processor
-	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('downsampler-processor');
-
-	// connect input, fx and output
-	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+	// load a worklet FX in a ToneAudioNode
+	this._fx = workletFX('downsampler-processor');
 
 	this.set = function(c, time, bpm){
 		// some parameter mapping changing input range 0-1 to 1-inf
-		const p = this._fx.workletNode.parameters.get('down');
-		const d = Math.floor(1 / (1 - Util.clip(Util.getParam(this._down, c) ** 0.25, 0, 0.999)));
-
-		p.setValueAtTime(Util.assureNum(d), time);
-
-		const w = Util.clip(Util.getParam(this._wet, c), 0, 1);
-		this._fx.output.gain.setValueAtTime(w, time);
-		this._mixDry.gain.setValueAtTime(1 - w, time);
+		const d = Math.floor(1 / (1 - clip(getParam(this._down, c) ** 0.25, 0, 0.999)));
+		// the drywet amount clamped between 0 and 1
+		const w = clip(getParam(this._wet, c), 0, 1);
+		
+		setParam(this._fx, 'down', d, time);
+		setParam(this._fx, 'drywet', w, time);
 	}
 
 	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._mix }
+		return { 'send' : this._fx, 'return' : this._fx }
 	}
 
 	this.delete = function(){
-		const nodes = [ this._fx.input, this._fx.output, this._fx, this._mix, this._mixDry ];
-
-		nodes.forEach((n) => {
-			n.disconnect();
-			n.dispose();
-		});
+		// stop the processor
+		this._fx.workletNode.port.postMessage('dispose');
+		disposeNodes([ this._fx, this._fx.input, this._fx.output ]);
 	}
 }
 
+// Overdrive FX
 // An overdrive/saturation algorithm using the arctan function as a 
 // waveshaping technique. Some mapping to apply a more equal loudness 
 // on the overdrive parameter when increasing the amount
 //
 const Overdrive = function(_params){
-	_params = Util.mapDefaults(_params, [ 2, 1 ]);
-	// apply the default values and convert to arrays where necessary
-	this._drive = Util.toArray(_params[0]);
-	this._wet = Util.toArray(_params[1]);
+	_params = mapDefaults(_params, [ 2, 1 ]);
+	this._drive = _params[0];
+	this._wet = _params[1];
 
-	// The crossfader for wet-dry (originally implemented with CrossFade)
-	// this._mix = new Tone.CrossFade();
-	this._mix = new Tone.Add();
-	this._mixWet = new Tone.Gain(0).connect(this._mix.input);
-	this._mixDry = new Tone.Gain(1).connect(this._mix.addend);	
-
-	// ToneAudioNode has all the tone effect parameters
-	this._fx = new Tone.ToneAudioNode();
-	// A gain node for connecting with input and output
-	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
-	this._fx.output = new Tone.Gain(1).connect(this._mixWet);
-
-	// the fx processor
-	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('arctan-distortion-processor');
-
-	// connect input, fx, output and wetdry
-	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+	// load a worklet FX in a ToneAudioNode
+	this._fx = workletFX('arctan-distortion-processor');
 
 	this.set = function(c, time, bpm){
 		// drive amount, minimum drive of 1
-		const d = Util.assureNum(Math.max(0, Util.getParam(this._drive, c)) + 1);
+		const d = fixNan(Math.max(0, getParam(this._drive, c)) + 1);
+		const wet = clip(getParam(this._wet, c), 0, 1);
 
 		// set the parameters in the workletNode
-		const amount = this._fx.workletNode.parameters.get('amount');
-		amount.setValueAtTime(d, time);
-
-		const wet = Util.clip(Util.getParam(this._wet, c), 0, 1);
-		this._mixWet.gain.setValueAtTime(wet);
-		this._mixDry.gain.setValueAtTime(1 - wet);
+		setParam(this._fx, 'amount', d, time);
+		setParam(this._fx, 'drywet', wet, time);
 	}
 
 	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._mix }
+		return { 'send' : this._fx, 'return' : this._fx }
 	}
 
 	this.delete = function(){
-		disposeNodes([ this._fx, this._fx.input, this._fx.output, this._mix, this._mixDry, this._mixWet ]);
+		this._fx.workletNode.port.postMessage('dispose');
+		disposeNodes([ this._fx, this._fx.input, this._fx.output ]);
 	}
 }
 
+// Fuzz FX
 // A fuzz distortion effect in modelled after the Big Muff Pi pedal 
 // by Electro Harmonics. Using three stages of distortion: 
 // 1 soft-clipping stage, 2 half-wave rectifier, 3 hard-clipping stage
 // 
 const Fuzz = function(_params){
-	_params = Util.mapDefaults(_params, [ 10, 1 ]);
-	// apply the default values and convert to arrays where necessary
-	this._drive = Util.toArray(_params[0]);
-	this._wet = Util.toArray(_params[1]);
+	_params = mapDefaults(_params, [ 10, 1 ]);
+	this._drive = _params[0];
+	this._wet = _params[1];
 
-	// The crossfader for wet-dry (originally implemented with CrossFade)
-	// this._mix = new Tone.CrossFade();
-	this._mix = new Tone.Add();
-	this._mixWet = new Tone.Gain(0).connect(this._mix.input);
-	this._mixDry = new Tone.Gain(1).connect(this._mix.addend);	
-
-	// ToneAudioNode has all the tone effect parameters
-	this._fx = new Tone.ToneAudioNode();
-	// A gain node for connecting with input and output
-	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
-	this._fx.output = new Tone.Gain(1).connect(this._mixWet);
-
-	// the fx processor
-	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('fuzz-processor');
-
-	// connect input, fx, output to wetdry
-	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+	// load a worklet FX in a ToneAudioNode
+	this._fx = workletFX('fuzz-processor');
 
 	this.set = function(c, time, bpm){
 		// drive amount, minimum drive of 1
-		const d = Util.assureNum(Math.max(1, Util.getParam(this._drive, c)) + 1);
+		const d = fixNan(Math.max(1, getParam(this._drive, c)) + 1);
+		const wet = clip(getParam(this._wet, c), 0, 1);
 
 		// set the parameters in the workletNode
-		const amount = this._fx.workletNode.parameters.get('amount');
-		amount.setValueAtTime(d, time);
-
-		const wet = Util.clip(Util.getParam(this._wet, c), 0, 1);
-		this._mixWet.gain.setValueAtTime(wet);
-		this._mixDry.gain.setValueAtTime(1 - wet);
+		setParam(this._fx, 'amount', d, time);
+		setParam(this._fx, 'drywet', wet, time);
 	}
 
 	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._mix }
+		return { 'send' : this._fx, 'return' : this._fx }
 	}
 
 	this.delete = function(){
-		disposeNodes([ this._fx, this._fx.input, this._fx.output, this._mix, this._mixDry, this._mixWet ]);
+		this._fx.workletNode.port.postMessage('dispose');
+		disposeNodes([ this._fx, this._fx.input, this._fx.output ]);
 	}
 }
 
+// Waveloss FX
+// The waveloss effect gradually drops sound (reduces it to 0) between detected
+// zero-crossings in the signal. This is based on a probability. The amount
+// increases the probability that the signal will be dropped.
+// Inspired by Supercollider waveloss function. 
+// The technique was described by Trevor Wishart in a lecture.
+// 
+const WaveLoss = function(_params){
+	_params = mapDefaults(_params, [0.5, 1]);
+	this._amount = _params[0];
+
+	this._fx = workletFX('waveloss-processor');
+
+	this.set = (count, time, bpm) => {
+		const a = clip(fixNonFinite(getParam(this._amount, count)));
+		setParam(this._fx, 'amount', a, time);
+	}
+
+	this.chain = () => { 
+		return { 'send' : this._fx, 'return' : this._fx } 
+	}
+
+	this.delete = () => {
+		this._fx.disposeWorklet();
+		disposeNodes([ this._fx ]);
+	}
+}
+
+// Compressor FX
 // A Compressor effect, allowing to reduce the dynamic range of a signal
 // Set the threshold (in dB's), the ratio, the attack and release time in ms
 // or relative to the tempo
 //
 const Compressor = function(_params){
 	// replace defaults with provided params
-	_params = Util.mapDefaults(_params, [-30, 6, 10, 80]);
+	this.defaults = [-30, 6, 10, 80];
+	this.defaults.splice(0, _params.length, ..._params);
+	_params = this.defaults.map(p => Util.toArray(p));	
 
 	this._fx = new Tone.Compressor({
 		threshold: -24,
@@ -15926,6 +15938,7 @@ const Compressor = function(_params){
 	}
 }
 
+// Chorus FX
 // A Chorus effect based on the default ToneJS effect
 // Also the Double effect if the wetdry is set to 1 (only wet signal)
 // 
@@ -15935,16 +15948,16 @@ const Chorus = function(_params){
 
 	this.set = (c, time, bpm) => {
 		// convert division to frequency
-		let f = Util.divToF(Util.getParam(_params[0], c), bpm);
+		let f = divToF(getParam(_params[0], c), bpm);
 		this._fx.frequency.setValueAtTime(f, time);
 		// delaytime/2 because of up and down through center
 		// eg. 25 goes from 0 to 50, 40 goes from 0 to 80, etc.
-		Util.atTime(() => {
-			this._fx.delayTime = Util.getParam(_params[1], c) / 2;
+		atTime(() => {
+			this._fx.delayTime = getParam(_params[1], c) / 2;
 		}, time);
 
 		// waveform for chorus is not supported in browser instead change wetdry
-		let w = Util.getParam(_params[2], c);
+		let w = getParam(_params[2], c);
 		if (isNaN(w)){
 			log(`Wavetype is not supported currently, instead change wet/dry with this argument, defaults to 0.5`);
 			w = 0.5;
@@ -15962,74 +15975,50 @@ const Chorus = function(_params){
 	}
 }
 
-
+// Squash FX
 // A distortion/compression effect of an incoming signal
 // Based on an algorithm by Peter McCulloch
 // 
 const Squash = function(_params){
-	_params = Util.mapDefaults(_params, [ 4, 1, 0.28 ]);
-	// apply the default values and convert to arrays where necessary
-	this._squash = Util.toArray(_params[0]);
-	this._wet = Util.toArray(_params[1]);
+	_params = mapDefaults(_params, [ 4, 1, 0.28 ]);
+	this._squash = _params[0];
+	this._wet = _params[1];
 
-	// The crossfader for wet-dry (originally implemented with CrossFade)
-	this._mix = new Tone.Add();
-	this._mixDry = new Tone.Gain(0).connect(this._mix.input);
-
-	// ToneAudioNode has all the tone effect parameters
-	this._fx = new Tone.ToneAudioNode();
-	// A gain node for connecting with input and output
-	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
-	this._fx.output = new Tone.Gain(1).connect(this._mix.addend);
-
-	// the fx processor
-	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('squash-processor');
-	// connect input, fx and output
-	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+	this._fx = workletFX('squash-processor');
 
 	this.set = function(c, time, bpm){
-		const d = Util.assureNum(Math.max(1, Util.getParam(this._squash, c)));
+		const d = fixNan(Math.max(1, getParam(this._squash, c)));
 		const m = 1.0 / Math.sqrt(d);
-
-		const amount = this._fx.workletNode.parameters.get('amount');
-		amount.setValueAtTime(d, time);
+		const wet = clip(getParam(this._wet, c));
 		
-		const makeup = this._fx.workletNode.parameters.get('makeup');
-		makeup.setValueAtTime(m, time);
-		
-		const wet = Util.clip(Util.getParam(this._wet, c));
-		this._fx.output.gain.setValueAtTime(m, time);
-		this._mixDry.gain.setValueAtTime(1 - wet, time);
+		setParam(this._fx, 'amount', d, time);
+		setParam(this._fx, 'makeup', m, time);
+		setParam(this._fx, 'drywet', wet, time);
 	}
 
 	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._mix }
+		return { 'send' : this._fx, 'return' : this._fx }
 	}
 
 	this.delete = function(){
-		let nodes = [ this._fx.input, this._fx.output, this._fx, this._mix, this._mixDry ];
-
-		nodes.forEach((n) => {
-			n.disconnect();
-			n.dispose();
-		});
+		this._fx.workletNode.port.postMessage('dispose');
+		disposeNodes([ this._fx, this._fx.input, this._fx.output ]);
 	}
 }
 
 // Reverb FX
 // Add a reverb to the sound to give it a feel of space
-// Using a decaying noise reverb algorithm, that does seem to 
-// increase the memory usage over time slowly
+// Uses the default Tone.Reverb, which uses a decaying noise convolution
+// Seems to leak memory and slowly increases browser RAM over time...
 // 
 const Reverb = function(_params){
-	_params = Util.mapDefaults(_params, [ 0.5, 1.5 ]);
-	this._wet = _params[0];
-	this._size = _params[1];
-
 	this._fx = new Tone.Reverb();
 
+	this._wet = (_params[0] !== undefined)? Util.toArray(_params[0]) : [ 0.5 ];
+	this._size = (_params[1] !== undefined)? Util.toArray(_params[1]) : [ 1.5 ];
+
 	this.set = function(c, time){
-		let tmp = Math.min(15, Math.max(0.1, Util.getParam(this._size, c)));
+		let tmp = Math.min(10, Math.max(0.1, Util.getParam(this._size, c)));
 		if (this._fx.decay != tmp){
 			Util.atTime(() => this._fx.decay = tmp, time);
 		}
@@ -16055,74 +16044,61 @@ const Reverb = function(_params){
 // https://github.com/khoin/DattorroReverbNode 
 //
 const DattorroReverb = function(_params){
-	_params = Util.mapDefaults(_params, [ 0.5, 10, 0, 0.5 ]);
-	this._gain = Util.toArray(_params[0]);
-	this._size = Util.toArray(_params[1]);
+	_params = mapDefaults(_params, [ 0.5, 10, 0, 0.5 ]);
+	this._gain = toArray(_params[0]);
+	this._size = toArray(_params[1]);
 	// unused currently, but here for compatibility with Mercury4Max code
-	// this._slide = Util.toArray(_params[2]); 
-	this._wet = Util.toArray(_params[3]);
-
-	// The crossfader for wet-dry (originally implemented with CrossFade)
-	this._mix = new Tone.Add();
-	this._mixWet = new Tone.Gain(0).connect(this._mix);
-	this._mixDry = new Tone.Gain(1).connect(this._mix.addend);
+	// this._slide = toArray(_params[2]); 
+	this._wet = toArray(_params[3]);
 
 	// a custom tone audio node with input/output gain and worklet effect
-	this._fx = new Tone.ToneAudioNode();
-	this._fx.input = new Tone.Gain(1).connect(this._mixDry);
-	this._fx.output = new Tone.Gain(1).connect(this._mixWet);
-	this._fx.workletNode = Tone.getContext().createAudioWorkletNode('dattorro-reverb');
-	this._fx.input.chain(this._fx.workletNode, this._fx.output);
+	this._fx = workletFX('dattorro-reverb');
 
 	this.set = (c, time) => {
-		const gn = Math.max(Util.getParam(this._gain, c), 0);
-		const meta = Util.clip(Util.getParam(this._size, c), 0, 20);
-		const wet = Util.clip(Util.getParam(this._wet, c));
+		const gn = Math.max(getParam(this._gain, c), 0);
+		const meta = clip(getParam(this._size, c), 0, 20);
+		const wet = clip(getParam(this._wet, c));
 
-		const dc = Util.remap(meta, 0, 20, 0.01, 0.99, 0.8);
-		const df = Util.remap(meta, 0, 20, 0.2, 0.75, 0.5);
-		const dp = Util.remap(meta, 0, 20, 0.2, 0.65, 2.5);
-		const pd = Util.remap(meta, 0, 20, 700, 100);
+		const dc = remap(meta, 0, 20, 0.01, 0.99, 0.8);
+		const df = remap(meta, 0, 20, 0.2, 0.75, 0.5);
+		const dp = remap(meta, 0, 20, 0.2, 0.65, 2.5);
+		const pd = remap(meta, 0, 20, 700, 100);
 
-		this._fx.workletNode.parameters.get('decay').setValueAtTime(dc, time);
-		this._fx.workletNode.parameters.get('decayDiffusion1').setValueAtTime(df, time);
-		this._fx.workletNode.parameters.get('damping').setValueAtTime(dp, time);
-		this._fx.workletNode.parameters.get('preDelay').setValueAtTime(pd, time);
-
-		this._fx.workletNode.parameters.get('wet').setValueAtTime(gn * 0.7, time);
-		// this._fx.workletNode.parameters.get('dry').setValueAtTime(0.7, time);
-
-		// apply wetdry mix
-		this._mixWet.gain.setValueAtTime(wet, time);
-		this._mixDry.gain.setValueAtTime(1 - wet, time);
+		setParam(this._fx, 'decay', dc, time);
+		setParam(this._fx, 'decayDiffusion1', df, time);
+		setParam(this._fx, 'damping', dp, time);
+		setParam(this._fx, 'preDelay', pd, time);
+		setParam(this._fx, 'gain', gn * 0.7, time);
+		setParam(this._fx, 'drywet', wet, time);
 	}
 
 	this.chain = () => {
-		return { 'send' : this._fx, 'return' : this._mix }
+		return { 'send' : this._fx, 'return' : this._fx }
 	}
 
 	this.delete = () => {
-		disposeNodes([ this._fx, this._mix, this._mixDry, this._mixWet, this._fx.input, this._fx.output ]);
+		this._fx.workletNode.port.postMessage('dispose');
+		disposeNodes([  this._fx.output, this._fx.input, this._fx ]);
 	}
 }
 
 // PitchShift FX
-// Shift the pitch up or down with semitones
+// Shift the pitch up or down in semitones
 // Utilizes the default PitchShift FX from ToneJS
 // 
 const PitchShift = function(_params){
-	_params = Util.mapDefaults(_params, [ -12, 1 ]);
+	_params = mapDefaults(_params, [ -12, 1 ]);
 	// apply the default values and convert to arrays where necessary
-	this._pitch = _params[0];
-	this._wet = _params[1];
+	this._pitch = toArray(_params[0]);
+	this._wet = toArray(_params[1]);
 
 	this._fx = new Tone.PitchShift();
 
 	this.set = function(c, time){
-		let p = Util.getParam(this._pitch, c);
-		let w = Util.getParam(this._wet, c);
+		let p = getParam(this._pitch, c);
+		let w = getParam(this._wet, c);
 
-		Util.atTime(() => this._fx.pitch = TL.toScale(p), time);
+		atTime(() => this._fx.pitch = TL.toScale(p), time);
 		this._fx.wet.setValueAtTime(w, time);
 	}
 
@@ -16138,6 +16114,7 @@ const PitchShift = function(_params){
 
 // LFO FX
 // a Low Frequency Oscillator effect, control tempo, type and depth
+// Using Tone.LFO with some specific mappings to fix phase issues
 //
 const LFO = function(_params){
 	_params = Util.mapDefaults(_params, [ '1/8', 'sine', 1 ]);
@@ -16226,146 +16203,203 @@ const LFO = function(_params){
 	}
 }
 
+// State Variable Filter FX
+// A new filter using the State Variable Filter implementation from Hal 
+// Chamberlin. The improved version, based on the paper:
+// "Improving the Digital Chamberlin State Variable Filter"
+// Updated version based on the paper https://arxiv.org/pdf/2111.05592
+// by Victor Lazzarini and Joseph Timoney, 2022
+// ported to gen~ and later JS by Timo Hoogland, 2026
+// Other useful resource on SVF: 
+// https://www.earlevel.com/main/2003/03/02/the-digital-state-variable-filter/
+//
+const SVF = function(_params){
+	_params = toArray(_params);
+	if (_params.length < 3 && _params.length){
+		if (typeof _params[0][0] !== 'string'){
+			_params = [['low']].concat(_params);
+		}
+	}
+	_params = mapDefaults(_params, ['lowpass', 1200, 0.45]);
+
+	this._type = _params[0];
+	this._freq = _params[1];
+	this._res = _params[2];
+
+	this._fx = workletFX('state-variable-filter');
+
+	this.set = function(c, time, bpm){
+		let tp = filtertypeIndex(checkFiltertype(getParam(this._type, c)));
+		setParam(this._fx, 'type', tp, time);
+
+		let fq = clip(fixNan(getParam(this._freq, c), 1000), 5, 18000);
+		setParam(this._fx, 'frequency', fq, time);
+
+		let rs = clip(fixNan(getParam(this._res, c), 0.8), 0.01, 0.95);
+		setParam(this._fx, 'resonance', rs, time);
+	}
+
+	this.chain = function(){
+		return { 'send' : this._fx, 'return' : this._fx };
+	}
+
+	this.delete = function(){
+		this._fx.disposeWorklet();
+		disposeNodes([ this._fx ]);
+	}
+}
+
+// State Variable Filter with LFO modulation option
+// Based on improved Hal Chamberlin SVF, see SVF above for more references
+// 
+const AutoSVF = function(_params){
+	_params = mapDefaults(_params, [ 'low', '1/1', 200, 3000, 0.45, 'sine', 0.5 ]);
+	this._fx = workletFX('state-variable-filter');
+	
+	// generate an LFO to modulate the cutoff-frequency of the filter
+	this._lfo = new Tone.LFO();
+	this._scale = new Tone.ScaleExp();
+	
+	// connect the LFO to the frequency param of the worklet processor
+	this._freqParam = this._fx.workletNode.parameters.get('frequency');
+	this._lfo.chain(this._scale, this._freqParam);
+
+	this.set = (c, time, bpm) => {
+		let tp = filtertypeIndex(checkFiltertype(getParam(_params[0], c)));
+		setParam(this._fx, 'type', tp, time);
+
+		let t = divToS(getParam(_params[1], c), bpm);
+		let f = 1 / t;
+		this._lfo.frequency.setValueAtTime(f, time);
+
+		let lo = clip(getParam(_params[2], c), 5, 18000);
+		let hi = clip(getParam(_params[3], c), 5, 18000);
+		let exp = clip(getParam(_params[6], c), 0.001, 100);
+		let res = clip(getParam(_params[4], c), 0.001, 0.95);
+		
+		let w = getParam(_params[5], c);
+		if (!isNaN(w)){
+			switch(Math.floor(clip(w, 0, 1)*2.99)){
+				case 0: 
+					// regular saw up
+					w = 'sawtooth'; break;
+				case 1:
+					w = 'sine'; break;
+				case 2:
+					// swap hi/lo range for saw down effect, invert exponent
+					w = 'sawtooth';
+					let tmp = lo; lo = hi; hi = tmp; 
+					exp = 1 / exp;
+					break;
+			}
+		}
+		w = assertLfoWave(w);
+		atTime(() => { this._lfo.set({ type: w }) }, time);
+
+		atTime(() => { this._scale.min = lo }, time);
+		atTime(() => { this._scale.max = hi }, time);
+		atTime(() => { this._scale.exponent = exp }, time);
+		
+		setParam(this._fx, 'resonance', res, time);
+
+		if (this._lfo.state !== 'started'){
+			time += lfoTimeCorrection(w, t);
+			this._lfo.start(time);
+		}
+	}
+
+	this.chain = () => {
+		return { 'send' : this._fx, 'return' : this._fx };
+	}
+
+	this.delete = () => {
+		this._fx.disposeWorklet();
+		disposeNodes([ this._fx ])
+	}
+}
+
+// Filter FX
 // A filter FX, choose between highpass, lowpass and bandpass
 // Set the cutoff frequency and Q factor
 // Optionally with extra arguments you can apply a modulation
 //
 const Filter = function(_params){
-	// parameter mapping changes based on amount of arguments
+// parameter mapping changes based on amount of arguments
 	this._static = true;
 	if (_params.length < 4){
 		if (typeof _params[0] === 'string'){
-			_params = Util.mapDefaults(_params, ['low', 1200, 0.45]);
+			_params = mapDefaults(_params, ['low', 1200, 0.45]);
 		} else {
-			_params = [['low']].concat(Util.mapDefaults(_params, [1200, 0.45]));
+			_params = [['low']].concat(mapDefaults(_params, [1200, 0.45]));
 		}
 	}
 	else {
-		_params = Util.mapDefaults(_params, ['low', '1/1', 200, 3000, 0.45, 'sine', 0.5]);
+		_params = mapDefaults(_params, ['low', '1/1', 200, 3000, 0.45, 'sine', 0.5]);
 		this._static = false;
 	}
 
-	this._fx = new Tone.Filter();
+	this._fx = new Tone.Filter({ rolloff: -24 });
 
 	// the following is only used if the parameters for modulation
 	// are added as arguments to the fx(filter) function
 	if (!this._static){
 		this._lfo = new Tone.LFO();
 		this._scale = new Tone.ScaleExp();
-		this._lfo.connect(this._scale);
-		this._scale.connect(this._fx.frequency);
+		this._lfo.chain(this._scale, this._fx.frequency);
 	}
-
 	// available filter types for the filter
-	this._types = {
-		'lo' : 'lowpass',
-		'low' : 'lowpass',
-		'lowpass' : 'lowpass',
-		'hi' : 'highpass',
-		'high' : 'highpass',
-		'highpass' : 'highpass',
-		'band' : 'bandpass',
-		'bandpass': 'bandpass',
-	}
-	if (this._types[_params[0]]){
-		this._fx.set({ type: this._types[_params[0]] });
-	} else {
-		console.log(`'${_params[0]}' is not a valid filter type. Defaults to lowpass`);
-		this._fx.set({ type: 'lowpass' });
-	}
-	this._fx.set({ rolloff: -24 });
-
-	// available waveforms for the LFO
-	this._waveMap = {
-		sine : 'sine',
-		// sineUp : 'sine',
-		// sineDown : 'sine',
-		saw : 'sawtooth',
-		sawUp: 'sawtooth',
-		sawDown: 'sawtooth',
-		up: 'sawtooth',
-		down: 'sawtooth',
-		// square : 'square',
-		// squareUp : 'square',
-		// squareDown : 'square',
-		// rect : 'square',
-		triangle : 'triangle',
-		tri : 'triangle',
-	}
+	this._fx.set({ type: checkFiltertype(_params[0]) });
 
 	this.set = function(c, time, bpm){
 		let _q;
 		// if the filter is static use the settings of frequency and resonance 
 		if (this._static){
-			let f = Util.getParam(_params[1], c);
 			_q = _params[2];
-
+			
+			let f = getParam(_params[1], c);
 			this._fx.frequency.setValueAtTime(f, time);
-			// let rt = Util.divToS(Util.getParam(this._rt, c), bpm);
 		} else {
 			_q = _params[4];
-			let t = Util.divToS(Util.getParam(_params[1], c), bpm);
+			
+			let t = divToS(getParam(_params[1], c), bpm);
 			let f = 1 / t;
-			let lo = Util.clip(Util.getParam(_params[2], c), 5, 19000);
-			let hi = Util.clip(Util.getParam(_params[3], c), 5, 19000);
+			this._lfo.frequency.setValueAtTime(f, time);
+			
+			let lo = clip(getParam(_params[2], c), 5, 19000);
+			let hi = clip(getParam(_params[3], c), 5, 19000);
+			let exp = clip(getParam(_params[6], c), 0.001, 100);
 
-			let w = Util.getParam(_params[5], c);
-			if (this._waveMap[w]){
-				w = this._waveMap[w];
-			} else {
-				if (isNaN(w)){
-					log(`${w} is not a valid waveshape. Defaults to sine`);
-					// default wave if wave does not exist
-					w = 'sine';
-				} else {
-					// w = value between 0 and 1, map to up, down, triangle 
-					// 0=down, 0.5=triangle, 1=up
-					switch(Math.floor(Util.clip(w, 0, 1)*2.99)){
-						case 0: 
-							// regular saw up
-							w = 'sawtooth'; break;
-						case 1:
-							w = 'sine'; break;
-						case 2:
-							w = 'sawtooth';
-							// swap hi/lo range for saw down effect
-							let tmp = lo; lo = hi; hi = tmp; break;
-					}
+			let w = getParam(_params[5], c);
+			if (!isNaN(w)){
+				switch(Math.floor(clip(w, 0, 1)*2.99)){
+					case 0: 
+						// regular saw up
+						w = 'sawtooth'; break;
+					case 1:
+						w = 'sine'; break;
+					case 2:
+						// swap hi/lo range for saw down effect, invert exponent
+						w = 'sawtooth';
+						let tmp = lo; lo = hi; hi = tmp; 
+						exp = 1 / exp;
+						break;
 				}
 			}
-			this._lfo.set({ type: w });
+			w = assertLfoWave(w);
+			atTime(() => { this._lfo.set({ type: w }) }, time);
 
-			let exp = Util.clip(Util.getParam(_params[6], c), 0.01, 100);
+			atTime(() => { this._scale.min = lo }, time);
+			atTime(() => { this._scale.max = hi }, time);
+			atTime(() => { this._scale.exponent = exp }, time);
 
-			this._scale.min = lo;
-			this._scale.max = hi;
-			this._scale.exponent = exp;
-			this._lfo.frequency.setValueAtTime(f, time);
-
-			this._lfo.max = 1;
-
-			if (this._lfo.state !== 'started'){
-				switch (w) {
-					case 'sine' :
-						time += t * 0.25; break;
-					case 'triangle' :
-						time += t * 0.25; break;
-					case 'sawtooth' :
-						time += t * 0.5; break;
-				}	
+			if (this._lfo.state !== 'started'){	
+				time += lfoTimeCorrection(w, t);
 				this._lfo.start(time);
 			}
 		}
 
-		let r = 1 / (1 - Math.min(0.95, Math.max(0, Util.getParam(_q, c))));
+		let r = 1 / (1 - Math.min(0.95, Math.max(0, getParam(_q, c))));
 		this._fx.Q.setValueAtTime(r, time);
-
-		// ramptime removed now that modulation is possible
-		// if (rt > 0){
-		// 	this._fx.frequency.rampTo(f, rt, time);
-		// } else {
-		// 	this._fx.frequency.setValueAtTime(f, time);
-		// }
 	}
 
 	this.chain = function(){
@@ -16373,86 +16407,69 @@ const Filter = function(_params){
 	}
 
 	this.delete = function(){
-		let nodes = [ this._fx, this._lfo, this._scale ];
-
-		nodes.forEach((n) => {
-			n?.disconnect();
-			n?.dispose();
-		});
+		disposeNodes([ this._fx, this._lfo, this._scale ]);
 	}
 }
 
-// A automated filter (filter with envelope) that is triggered by the note
-// Set the filter type (lowpass, highpass, bandpass)
-// Set the attack and release time
-// Set the low and high filter range
-// Set the curve mode
+// TriggerFilter FX
+// A automated filter (filter with envelope) that is triggered by the sequencer.
+// Uses the updated Hal Chamberlin State Variable Filter in a worklet processor.
+// Set the filter type (lowpass, highpass, bandpass). Set the attack and 
+// release time. Set the low and high filter range. Set the curve mode
 //
 const TriggerFilter = function(_params){
-	this._fx = new Tone.Filter(1000, 'lowpass', -24);
-	this._adsr = new Tone.Envelope({
-		attackCurve: "linear",
-		decayCurve: "linear",
-		sustain: 0,
-		release: 0.001
-	});
+	this._fx = workletFX('state-variable-filter');
+	this._env = new Tone.Signal(0);
 	this._mul = new Tone.Multiply();
 	this._add = new Tone.Add();
-	this._pow = new Tone.Pow(3);
+	this._pow = new Tone.Pow(2);
 
-	this._adsr.connect(this._pow.connect(this._mul));
+	this._env.connect(this._pow);
+	this._pow.connect(this._mul);
 	this._mul.connect(this._add);
-	this._add.connect(this._fx.frequency);
 
-	this._types = {
-		'lo' : 'lowpass',
-		'low' : 'lowpass',
-		'lowpass' : 'lowpass',
-		'hi' : 'highpass',
-		'high' : 'highpass',
-		'highpass' : 'highpass',
-		'band' : 'bandpass',
-		'bandpass': 'bandpass'
-	}
+	// connect envelope to frequency parameter from workletnode
+	this._freqParam = this._fx.workletNode.parameters.get('frequency');
+	this._add.connect(this._freqParam);
 
 	// replace defaults with provided arguments
-	_params = Util.mapDefaults(_params, ['low', 1, '1/16', 4000, 100, 1]);
-	// this.defaults.splice(0, _params.length, ..._params);
-	_params = _params.map(p => Util.toArray(p));
+	_params = Util.mapDefaults(_params, ['low', 1, '1/16', 4000, 100, 0.5]);
 
-	if (this._types[_params[0][0]]){
-		this._fx.set({ type: this._types[_params[0][0]] });
-	} else {
-		Util.log(`'${_params[0][0]}' is not a valid filter type. Defaulting to lowpass`);
-		this._fx.set({ type: 'lowpass' });
-	}
+	// default resonance for the filter
+	setParam(this._fx, 'resonance', 0.3);
 
+	this._type = _params[0];
 	this._att = _params[1];
 	this._rel = _params[2];
-	this._high = _params[3];
-	this._low = _params[4];
+	this._max = _params[3];
+	this._min = _params[4];
 	this._exp = _params[5];
 
 	this.set = function(c, time, bpm){
-		this._adsr.attack = Util.divToS(Util.getParam(this._att, c), bpm);
-		this._adsr.decay = Util.divToS(Util.getParam(this._rel, c), bpm);
+		let tp = filtertypeIndex(checkFiltertype(getParam(this._type, c)));
+		setParam(this._fx, 'type', tp, time);
 
-		let min = Util.getParam(this._low, c);
-		let max = Util.getParam(this._high, c);
+		let att = divToS(getParam(this._att, c), bpm);
+		let rel = divToS(getParam(this._rel, c), bpm);
+		let max = Util.getParam(this._max, c);
+		let min = Util.getParam(this._min, c);
 		let range = Math.abs(max - min);
 		let lower = Math.min(max, min);
 		let exp = 1 / Util.getParam(this._exp, c);
 
 		this._mul.setValueAtTime(range, time);
 		this._add.setValueAtTime(lower, time);
-		Util.atTime(() => { this._pow.value = exp }, time);
+		atTime(() => { this._pow.value = exp }, time);
 
-		// fade-out running envelope over 5 ms
-		if (this._adsr.value > 0){
-			this._adsr.triggerRelease(time);
-			time += this._adsr.release;
+		// retrigger fade-out envelope over 2 ms
+		let retrigger = 0;
+		if (this._env.getValueAtTime(time) > 0.01){
+			this._env.rampTo(0.0, 0.002, time);
+			retrigger = 0.003;
 		}
-		this._adsr.triggerAttack(time, 1);
+		// trigger attack and release part of the envelope for filter modulation
+		this._env.rampTo(1, att, time + retrigger);
+		this._env.rampTo(0, rel, time + att + retrigger);
 	}
 
 	this.chain = function(){
@@ -16460,228 +16477,61 @@ const TriggerFilter = function(_params){
 	}
 
 	this.delete = function(){
-		let nodes = [ this._fx, this._adsr, this._mul, this._add, this._pow ];
-
-		nodes.forEach((b) => {
-			b.disconnect();
-			b.dispose();
-		});
+		this._fx.disposeWorklet();
+		disposeNodes([ this._fx, this._env, this._mul, this._add, this._pow ]);
 	}
 }
 
-/*const AutoFilter = function(_params){
-	console.log('FX => AutoFilter()', _params);
-
-	this._fx = new Tone.AutoFilter('8n', 100, 4000);
-
-	this.set = function(c, time, bpm){
-
-	}
-
-	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._fx }
-	}
-
-	this.delete = function(){
-		this._fx.disconnect();
-		this._fx.dispose();
-	}
-}*/
-
-// Custom stereo delay implementation with lowpass filter in feedback loop
-const Delay = function(_params){
-	// apply the default values and convert to arrays where necessary
+// Delay FX
+// A new ping-pong delay implementation using a custom AudioWorkletProcessor. 
+// The custom processor allows for shorter delaytimes, and less overhead since 
+// everything runs inside one Tone AudioNode instead of using multiple 
+// Web Audio Nodes. The delay includes a lowpass filter in the feedback 
+// loop and delaytimes are set for the left and right channel independently, 
+// but channels are cross-mixed. The feedbackloop also includes a 10Hz highpass 
+// filter to remove DC-offset and reduce energy build-up in the low-frequency 
+// range with high feedback amounts.
+//
+const WorkletDelay = function(_params) {
+	// if only 1 param, apply time to both Left and Right
 	if (_params.length === 1){ _params[1] = _params[0] }
+	// if only 2 params, apply time to Left and Right, and second value feedback
 	else if (_params.length === 2){
 		_params[2] = _params[1];
 		_params[1] = _params[0];
 	}
+	// param order: timeLeft, timeRight, feedback, damping, drywet
+	_params = mapDefaults(_params, [ '2/16', '3/16', 0.8, 0.4, 0.5 ]);
 
-	_params = Util.mapDefaults(_params, [ '3/16', '2/8', 0.7, 0.6, 0.5 ]);
-	this._timeL = Util.toArray(_params[0]);
-	this._timeR = Util.toArray(_params[1]);
-	this._feedBack = Util.toArray(_params[2]);
-	this._fbDamp = Util.toArray(_params[3]);
-	this._wet = Util.toArray(_params[4]);
+	this._maxTime = 5000;
+	// load a worklet FX in a ToneAudioNode
+	this._fx = workletFX('stereo-delay');
 
-	this._fx = new Tone.Gain(1);
-	this._fb = new Tone.Gain(0.5);
-	this._mix = new Tone.CrossFade(0.5);
-	this._split = new Tone.Split(2);
-	this._merge = new Tone.Merge(2);
-	this._maxDelay = 3;
+	this.set = (c, time, bpm) => {
+		const dL = clip(divToS(getParam(_params[0], c), bpm) * 1000, 0, this._maxTime);
+		const dR = clip(divToS(getParam(_params[1], c), bpm) * 1000, 0, this._maxTime);
+		const fb = clip(fractToFloat(getParam(_params[2], c), 0, 2));
+		const dm = clip(getParam(_params[3], c), 0.01, 0.99);
+		const dw = clip(getParam(_params[4], c));
 
-	this._delayL = new Tone.Delay({ maxDelay: this._maxDelay });
-	this._delayR = new Tone.Delay({ maxDelay: this._maxDelay });
-	this._flt = new Tone.Filter(1000, 'lowpass', '-12');
-
-	// split the signal
-	this._fx.connect(this._mix.a);
-	this._fx.connect(this._fb);
-
-	this._fb.connect(this._split);
-	// the feedback node connects to the delay L + R
-	this._split.connect(this._delayL, 0, 0);
-	this._split.connect(this._delayR, 1, 0);
-	// merge back
-	this._delayL.connect(this._merge, 0, 0);
-	this._delayR.connect(this._merge, 0, 1);
-	// the delay is the input chained to the sample and returned
-	// the delay also connects to the onepole filter
-	this._merge.connect(this._flt);
-	// the output of the onepole is stored back in the gain for feedback
-	this._flt.connect(this._fb);
-	// connect the feedback also to the crossfade mix
-	this._fb.connect(this._mix.b);
-
-	this.set = function(c, time, bpm){
-		let dL = Math.min(this._maxDelay, Math.max(0, Util.formatRatio(Util.getParam(this._timeL, c), bpm)));
-		let dR = Math.min(this._maxDelay, Math.max(0, Util.formatRatio(Util.getParam(this._timeR, c), bpm)));
-		let fb = Math.max(0, Math.min(0.99, Util.getParam(this._feedBack, c) * 0.707));
-		let cf = Math.max(10, Util.getParam(this._fbDamp, c) * 8000);
-
-		this._delayL.delayTime.setValueAtTime(dL + Math.random() * 0.001, time);		
-		this._delayR.delayTime.setValueAtTime(dR + Math.random() * 0.001, time);
-		this._fb.gain.setValueAtTime(Util.assureNum(fb, 0.7), time);
-		this._flt.frequency.setValueAtTime(cf, time);
-
-		const wet = Util.clip(Util.getParam(this._wet, c));
-		this._mix.fade.setValueAtTime(wet, time);
+		// set parameters for workletprocessor
+		setParam(this._fx, 'timeL', dL, time);
+		setParam(this._fx, 'timeR', dR, time);
+		setParam(this._fx, 'feedback', fixNonFinite(fb, 0.5), time);
+		setParam(this._fx, 'damping', fixNonFinite(dm, 0.5), time);
+		setParam(this._fx, 'drywet', fixNonFinite(dw, 0.5), time);
 	}
 
-	this.chain = function(){
-		return { 'send' : this._fx, 'return' : this._mix };
+	this.chain = () => {
+		return { 'send' : this._fx, 'return' : this._fx }
 	}
 
-	this.delete = function(){
-		let nodes = [ this._fx, this._fb, this._mix, this._split, this._merge, this._delayL, this._delayR, this._flt ];
-
-		nodes.forEach((b) => {
-			b.disconnect();
-			b.dispose();
-		});
+	this.delete = () => {
+		this._fx.disposeWorklet();
+		disposeNodes([ this._fx ]);
 	}
 }
 
-// Old pingpong delay implementation, just using the Tone.PingPongDelay()
-// const PingPongDelay = function(_params){
-// 	this._fx = new Tone.PingPongDelay();
-// 	this._fx.set({ wet: 0.4 });
-
-// 	// console.log('delay', param);
-// 	this._dTime = (_params[0] !== undefined)? Util.toArray(_params[0]) : [ '3/16' ];
-// 	this._fb = (_params[1] !== undefined)? Util.toArray(_params[1]) : [ 0.3 ];
-// 	// let del = new Tone.PingPongDelay(formatRatio(t), fb);
-
-// 	this.set = function(c, time, bpm){
-// 		let t = Math.max(0, Util.formatRatio(Util.getParam(this._dTime, c), bpm));
-// 		let fb = Math.max(0, Math.min(0.99, Util.getParam(this._fb, c)));
-
-// 		this._fx.delayTime.setValueAtTime(t, time);
-// 		this._fx.feedback.setValueAtTime(fb, time);
-// 	}
-
-// 	this.chain = function(){
-// 		return { 'send' : this._fx, 'return' : this._fx };
-// 	}
-
-// 	this.delete = function(){
-// 		this._fx.disconnect();
-// 		this._fx.dispose();
-// 	}
-// }
-
-// const FreeVerb = function(_params){
-// 	this._fx = new Tone.Freeverb(_params[0], _params[1]);
-
-// 	this.set = function(c, time, bpm){
-
-// 	}
-
-// 	this.chain = function(){
-// 		return { 'send' : this._fx, 'return' : this._fx };
-// 	}
-
-// 	this.delete = function(){
-// 		let nodes = [ this._fx ];
-
-// 		nodes.forEach((b) => {
-// 			b.disconnect();
-// 			b.dispose();
-// 		});
-// 	}
-// }
-
-// squash/compress an incoming signal
-// based on algorithm by Peter McCulloch
-// const SquashDeprecated = function(_params){
-// 	this._compress = (_params[0] !== undefined)? Util.toArray(_params[0]) : [1];
-
-// 	this._fx = new Tone.WaveShaper();
-
-// 	this.shaper = function(amount){
-// 		// (a * c) / ((a * c)^2 * 0.28 + 1) / √c
-// 		// drive amount, minimum of 1
-// 		const c = amount;
-// 		// makeup gain
-// 		const m = 1.0 / Math.sqrt(c);
-// 		// set the waveshaper effect
-// 		this._fx.setMap((x) => {
-// 			return (x * c) / ((x * c) * (x * c) * 0.28 + 1) * m; 
-// 		});
-// 	}
-	
-// 	this.set = function(c){
-// 		let d = Util.getParam(this._compress, c);
-// 		this.shaper(isNaN(d)? 1 : Math.max(1, d));
-// 	}
-
-// 	this.chain = function(){
-// 		return { 'send' : this._fx, 'return' : this._fx };
-// 	}
-
-// 	this.delete = function(){
-// 		this._fx.disconnect();
-// 		this._fx.dispose();
-// 	}
-// }
-
-// A distortion algorithm using the tanh (hyperbolic-tangent) as a 
-// waveshaping technique. Some mapping to apply a more equal loudness 
-// distortion is applied on the overdrive parameter
-//
-// const DriveDeprecated = function(_params){
-// 	this._drive = (_params[0] !== undefined)? Util.toArray(_params[0]) : [1.5];
-
-// 	this._fx = new Tone.WaveShaper();
-
-// 	this.shaper = function(amount){
-// 		// drive curve, minimum drive of 1
-// 		const d = Math.pow(amount, 2);
-// 		// makeup gain
-// 		const m = Math.pow(d, 0.6);
-// 		// preamp gain reduction for linear at drive = 1
-// 		const p = 0.4;
-// 		// set the waveshaping effect
-// 		this._fx.setMap((x) => {
-// 			return Math.tanh(x * p * d) / p / m;
-// 		});
-// 	}
-	
-// 	this.set = function(c){
-// 		let d = Util.getParam(this._drive, c);
-// 		this.shaper(isNaN(d)? 1 : Math.max(1, d));
-// 	}
-
-// 	this.chain = function(){
-// 		return { 'send' : this._fx, 'return' : this._fx };
-// 	}
-
-// 	this.delete = function(){
-// 		this._fx.disconnect();
-// 		this._fx.dispose();
-// 	}
-// }
 },{"./Util.js":67,"tone":44,"total-serialism":47}],57:[function(require,module,exports){
 const Tone = require('tone');
 const Util = require('./Util.js');
@@ -17965,7 +17815,7 @@ class PolySynth extends PolyInstrument {
 
 		// set wave to oscillator
 		let w = Util.getParam(this._wave, c);
-		this.sources[id].set({ type: Util.assureWave(w) });
+		this.sources[id].set({ type: Util.assertWave(w) });
 
 		// set the frequency based on the selected note
 		// note as interval / octave coordinate
@@ -18031,6 +17881,7 @@ class Sequencer {
 	constructor(engine, canvas){
 		// The Tone engine
 		this._engine = engine;
+		// The Hydra canvas
 		this._canvas = canvas;
 		
 		// Sequencer specific parameters
@@ -18297,16 +18148,21 @@ class Sequencer {
 module.exports = Sequencer;
 },{"./Util.js":67,"tone":44}],67:[function(require,module,exports){
 const Tone = require('tone');
+const { scale } = require('total-serialism').Utility;
 const { noteToMidi, toScale, mtof } = require('total-serialism').Translate;
 
 // replace defaults with incoming parameters
 function mapDefaults(params, defaults){
+	// params = params.filter((e) => {
+	// 	return e !== undefined;
+	// });
+
 	defaults.splice(0, params.length, ...params);
 	return defaults.map(p => toArray(p));
 }
 
-// Function that is evaluated at a specific time from Tone Transpor
-// More precise than Tone.Transport.ScheduleOnce()
+// Function that is evaluated at a specific time from Tone Transport
+// Seems to be more precise than Tone.Transport.ScheduleOnce()
 // Workaround for Tone objects that don't have setValueAtTime
 function atTime(callback, time){
 	setTimeout(callback, (time - Tone.context.currentTime) * 1000);
@@ -18334,8 +18190,13 @@ function remap(val=0, inLo=0, inHi=1, outLo=0, outHi=1, exp=1){
 }
 
 // make sure the output is a number, else output a default value
-function assureNum(v, d=1){
+function fixNan(v, d=1){
 	return isNaN(v) ? d : v;
+}
+
+// fix non-finite numbers, else output a default value
+function fixNonFinite(v, d=0){
+	return isFinite(parseFloat(v)) ? v : d;
 }
 
 // lookup a value from array with wrap index
@@ -18365,8 +18226,8 @@ function isRandom(a, l=0, h=1){
 function getParam(a, i){
 	// also check if value is an osc-address, then use last received value
 	// return randLookup(getOSC(lookup(a, i)));
-	return evalExpr(randLookup(lookup(getOSC(a), i)));
-	// return randLookup(lookup(getOSC(a), i));
+	// return evalExpr(randLookup(lookup(getOSC(a), i)));
+	return randLookup(lookup(getOSC(a), i));
 }
 
 // retrieve received messages via osc as arguments or pass through
@@ -18377,11 +18238,31 @@ function getOSC(a){
 		// pass through
 		return a;
 	} else if (osc.match(/^\/[^`'"\s]+/g)){
+		// check and remove any scaling arguments
+		let scaling;
+		try {
+			if (osc.match(/\{.*\}/)){
+				// has a scaling pattern in the form of {inlo:inhi:outlo:outhi}
+				scaling = osc.match(/\{(.*)\}/)[1].split(':');
+				osc = osc.replace(/\{.*\}/, '');
+			}
+		} catch (e) {
+			log(`Not a valid scaling argument for ${osc}, ${e}`);
+		}
+
+		// return 0 if no osc message is received yet
 		if (!window.oscMessages[osc]){
 			log(`No message received on address ${osc}`);
 			return [0];
 		}
-		return window.oscMessages[osc];
+		// get the value from the message
+		let v = window.oscMessages[osc];
+		// apply the scaling and return the value
+		if (scaling !== undefined){
+			scaling = [0, 1, 0, 1].slice(0, -scaling.length).concat(scaling);
+			v = scale(v, ...scaling.map(x => Number(x)));
+		}
+		return v;
 	}
 	// pass through
 	return a;
@@ -18429,6 +18310,18 @@ function msToS(ms){
 	return ms / 1000.0;
 }
 
+// convert a fraction string to a floating point value
+// or pass through
+function fractToFloat(f){
+	if (typeof f !== 'string') return f;
+	// check if string has format fraction and evaluate
+	if (String(f).match(/\d+\/\d+/)){
+		return eval(String(f));
+	}
+	// otherwise return input
+	return f;
+}
+
 // parse division formats to Tone Loop intervals in seconds
 function formatRatio(d, bpm){
 	if (String(d).match(/\d+\/\d+/)){
@@ -18449,7 +18342,7 @@ function divToS(d, bpm){
 		return Number(d) / 1000;
 	} else {
 		log(`${d} is not a valid time value`);
-		return 0.1;
+		return 0.25;
 	}
 }
 
@@ -18466,7 +18359,7 @@ function noteToFreq(i, o){
 			log(`${i} is not a valid number or name`);
 			i = 0;
 		} else {
-			i = _i - 48;
+			i = _i - 36;
 		}
 	}
 	// reconstruct midi note value, (0, 0) = 36
@@ -18478,27 +18371,69 @@ function noteToFreq(i, o){
 	return mtof(n);
 }
 
-function assureWave(w){
+// assert the wavetype is valid for an oscillator
+function assertWave(w){
 	let waveMap = {
 		sine : 'sine',
+		sin : 'sine',
+		cosine : 'sine',
+		cos : 'sine',
 		saw : 'sawtooth',
+		sawtooth : 'sawtooth',
 		square : 'square',
+		rect : 'square',
 		triangle : 'triangle',
 		tri : 'triangle',
-		rect : 'square',
 		fm: 'fmsine',
 		am: 'amsine',
 		pwm: 'pwm',
 		organ: 'sine4',
 	}
 	if (waveMap[w]){
-		w = waveMap[w];
-	} else {
-		log(`${w} is not a valid waveshape`);
-		// default wave if wave does not exist
-		w = 'sine';
+		return waveMap[w];
+	} 
+	log(`${w} is not a valid waveshape. Defaulting to: sine`);
+	return 'sine';
+}
+
+// assert the wavetype is valid for an LFO
+function assertLfoWave(w){
+	let waves = {
+		sine : 'sine',
+		// sineUp : 'sine',
+		// sineDown : 'sine',
+		saw : 'sawtooth',
+		sawUp: 'sawtooth',
+		sawDown: 'sawtooth',
+		sawtooth: 'sawtooth',
+		up: 'sawtooth',
+		down: 'sawtooth',
+		square : 'square',
+		rect : 'square',
+		// squareUp : 'square',
+		// squareDown : 'square',
+		triangle : 'triangle',
+		tri : 'triangle',
 	}
-	return w;
+	if (waves[w]){
+		return waves[w];
+	} 
+	log(`${w} is not a valid waveshape. Defaulting to: sine`);
+	return 'sine';
+}
+
+// correct the lfo startime for ToneJS LFO's for correct phase
+function lfoTimeCorrection(wave, time){
+	let mul = 1;
+	switch (wave) {
+		case 'sine' :
+			mul = 0.25; break;
+		case 'triangle' :
+			mul = 0.25; break;
+		case 'sawtooth' :
+			mul = 0.5; break;
+	}
+	return time * mul;
 }
 
 // convert note and octave (int/float/name) to a midi value
@@ -18515,6 +18450,49 @@ function toMidi(n=0, o=0){
 	return toScale(n + o * 12 + 36);
 }
 
+// Set a parameter in an worklet processor
+function setWorkletParam(node, param, value, time) {
+	const p = node.workletNode.parameters.get(param);
+	const v = fixNan(value);
+	p.setValueAtTime(v, time ?? Tone.now());
+}
+
+function checkFiltertype(type){
+	let types = {
+		'lp' : 'lowpass',
+		'lo' : 'lowpass',
+		'low' : 'lowpass',
+		'lowpass' : 'lowpass',
+		'hp' : 'highpass',
+		'hi' : 'highpass',
+		'high' : 'highpass',
+		'highpass' : 'highpass',
+		'bp' : 'bandpass',
+		'band' : 'bandpass',
+		'bandpass': 'bandpass',
+	}
+	if (types[type]){
+		return types[type];
+	}
+	log(`${type} is not a valid filter type. Defaulting to: lowpass`);
+	return 'lowpass';
+}
+
+// Get an integer based on the name of a filtertype
+// or just return the integer
+function filtertypeIndex(type){
+	let types = {
+		'lowpass' : 0,
+		'highpass' : 1,
+		'bandpass' : 2
+	}
+	if (Object.hasOwn(types, type)){
+		return types[type];
+	}
+	log(`${type} is not a valid filter type. Defaulting to: lowpass`);
+	return 0;
+}
+
 // the log message is used to log to the console but also
 // sends a custom event that can be listened for to print the 
 // content at some other place in the window, for example using a div
@@ -18526,7 +18504,7 @@ function log(msg){
 	}
 }
 
-module.exports = { mapDefaults, atTime, atodb, dbtoa, clip, remap,assureNum, lookup, randLookup, isRandom, getParam, toArray, msToS, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assureWave, log }
+module.exports = { mapDefaults, atTime, atodb, dbtoa, clip, fixNan, fixNonFinite, lookup, randLookup, isRandom, getParam, toArray, msToS, fractToFloat, formatRatio, divToS, divToF, toMidi, mtof, noteToMidi, noteToFreq, assertWave, assertLfoWave, remap, setWorkletParam, checkFiltertype, filtertypeIndex, lfoTimeCorrection, log }
 },{"tone":44,"total-serialism":47}],68:[function(require,module,exports){
 module.exports={
 	"uptempo" : 10,
@@ -18931,7 +18909,7 @@ const { WebMidi } = require("webmidi");
 // load extra AudioWorkletProcessors from file
 // transformed to inline with browserify brfs
 
-const fxExtensions = "\n// Various noise type processors for the MonoNoise source\n// Type 2 is Pink noise, used from Tone.Noise('pink') instead of calc\n//\nclass NoiseProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'type',\n\t\t\tdefaultValue: 5,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 5\n\t\t},{\n\t\t\tname: 'density',\n\t\t\tdefaultValue: 0.125,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 1\n\t\t}];\n\t}\n\t\n\tconstructor(){\n\t\tsuper();\n\t\t// sample previous value\n\t\tthis.prev = 0;\n\t\t// latch to a sample \n\t\tthis.latch = 0;\n\t\t// phasor ramp\n\t\tthis.phasor = 0;\n\t\tthis.delta = 0;\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\t// input is not used because this is a source\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\t\tconst HALF_PI = Math.PI/2;\n\n\t\t// for one output channel generate some noise\t\n\t\tif (input.length > 0){\n\t\t\tfor (let i = 0; i < input[0].length; i++){\n\t\t\t\tconst t = (parameters.type.length > 1) ? parameters.type[i] : parameters.type[0];\n\t\t\t\tconst d = (parameters.density.length > 1) ? parameters.density[i] : parameters.density[0];\n\t\t\t\n\t\t\t\t// some bipolar white noise -1 to 1\n\t\t\t\tconst biNoise = Math.random() * 2 - 1;\n\t\t\t\t// empty output\n\t\t\t\tlet out = 0;\n\n\t\t\t\t// White noise, Use for every other choice\n\t\t\t\tif (t < 1){\n\t\t\t\t\tout = biNoise * 0.707;\n\t\t\t\t}\n\t\t\t\t// Pink noise,  use Tone.Noise('pink') object for simplicity\n\t\t\t\telse if (t < 2){\n\t\t\t\t\tout = input[0][i] * 1.413;\n\t\t\t\t}\n\t\t\t\t// Brownian noise\n\t\t\t\t// calculate a random next value in \"step size\" and add to \n\t\t\t\t// the previous noise signal value creating a \"drunk walk\" \n\t\t\t\t// or brownian motion\n\t\t\t\telse if (t < 3){\t\t\n\t\t\t\t\tthis.prev += biNoise * d*d;\n\t\t\t\t\tthis.prev = Math.asin(Math.sin(this.prev * HALF_PI)) / HALF_PI;\n\t\t\t\t\tout = this.prev * 0.707;\n\t\t\t\t}\n\t\t\t\t// Lo-Fi (sampled) noise\n\t\t\t\t// creates random values at a specified frequency and slowly \n\t\t\t\t// ramps to that new value\n\t\t\t\telse if (t < 4){\n\t\t\t\t\t// create a ramp from 0-1 at specific frequency/density\n\t\t\t\t\tthis.phasor = (this.phasor + d * d * 0.5) % 1;\n\t\t\t\t\t// calculate the delta\n\t\t\t\t\tlet dlt = this.phasor - this.delta;\n\t\t\t\t\tthis.delta = this.phasor;\n\t\t\t\t\t// when ramp resets, latch a new noise value\n\t\t\t\t\tif (dlt < 0){\n\t\t\t\t\t\tthis.prev = this.latch;\n\t\t\t\t\t\tthis.latch = biNoise;\n\t\t\t\t\t}\n\t\t\t\t\t// linear interpolation from previous to next point\n\t\t\t\t\tout = this.prev + this.phasor * (this.latch - this.prev);\n\t\t\t\t\tout *= 0.707;\n\t\t\t\t}\n\t\t\t\t// Dust noise\n\t\t\t\t// randomly generate an impulse/click of value 1 depending \n\t\t\t\t// on the density, average amount of impulses per second\n\t\t\t\telse if (t < 5){\n\t\t\t\t\tout = Math.random() > (1 - d*d*d * 0.5);\n\t\t\t\t}\n\t\t\t\t// Crackle noise\n\t\t\t\t// Pink generator with \"wave-loss\" leaving gaps\n\t\t\t\telse {\n\t\t\t\t\tlet delta = input[0][i] - this.prev;\n\t\t\t\t\tthis.prev = input[0][i];\n\t\t\t\t\tif (delta > 0){\n\t\t\t\t\t\tthis.latch = Math.random();\n\t\t\t\t\t}\n\t\t\t\t\tout = (this.latch < (1 - d*d*d)) ? 0 : input[0][i] * 1.413;\n\t\t\t\t}\n\t\t\t\t// send to output whichever noise type was chosen\n\t\t\t\toutput[0][i] = out;\n\t\t\t}\n\t\t}\t\t\n\t\treturn true;\n\t}\n}\nregisterProcessor('noise-processor', NoiseProcessor);\n\n// A Downsampling Chiptune effect. Downsamples the signal by a specified amount\n// Resulting in a lower samplerate, making it sound more like 8bit/chiptune\n// Programmed with a custom AudioWorkletProcessor, see effects/Processors.js\n//\nclass DownSampleProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [{\n\t\t\tname: 'down',\n\t\t\tdefaultValue: 8,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 2048\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t\t// the frame counter\n\t\tthis.count = 0;\n\t\t// sample and hold variable array\n\t\tthis.sah = [];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\t// if there is anything to process\n\t\tif (input.length > 0){\n\t\t\t// for the length of the sample array (generally 128)\n\t\t\tfor (let i=0; i<input[0].length; i++){\n\t\t\t\tconst d = (parameters.down.length > 1) ? parameters.down[i] : parameters.down[0];\n\t\t\t\t// for every channel\n\t\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\t\t// if counter equals 0, sample and hold\n\t\t\t\t\tif (this.count % d === 0){\n\t\t\t\t\t\tthis.sah[channel] = input[channel][i];\n\t\t\t\t\t}\n\t\t\t\t\t// output the currently held sample\n\t\t\t\t\toutput[channel][i] = this.sah[channel];\n\t\t\t\t}\n\t\t\t\t// increment sample counter\n\t\t\t\tthis.count++;\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('downsampler-processor', DownSampleProcessor);\n\n// A distortion algorithm using the tanh (hyperbolic-tangent) as a \n// waveshaping technique. Some mapping to apply a more equal loudness \n// distortion is applied on the overdrive parameter\n//\nclass TanhDistortionProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1\n\t\t}, {\n\t\t\tname: 'makeup',\n\t\t\tdefaultValue: 0.5,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 2\n\t\t}]\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\tconst m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];\n\t\t\t\t\t// simple waveshaping with tanh\n\t\t\t\t\toutput[channel][i] = Math.tanh(input[channel][i] * a) * m;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('tanh-distortion-processor', TanhDistortionProcessor);\n\n// A distortion algorithm using the arctan function as a \n// waveshaping technique. Some mapping to apply a more equal loudness \n// distortion is applied on the overdrive parameter\n//\nclass ArctanDistortionProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 5,\n\t\t\tminValue: 1\n\t\t}]\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\n\t\t// quarter pi constant and inverse\n\t\tthis.Q_PI = 0.7853981633974483; // 0.25 * Math.PI;\n\t\tthis.INVQ_PI = 1.2732395447351628; //1.0 / this.Q_PI;\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tconst gain = parameters.amount[0];\n\t\tconst makeup = Math.min(1, Math.max(0, 1 - ((Math.atan(gain) - this.Q_PI) * this.INVQ_PI * 0.823)));\n\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; channel++){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\toutput[channel][i] = Math.atan(input[channel][i] * gain) * makeup;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('arctan-distortion-processor', ArctanDistortionProcessor);\n\n\n// A fuzz distortion effect in modelled after the Big Muff Pi pedal \n// by Electro Harmonics. Using three stages of distortion: \n// 1 soft-clipping stage, 2 half-wave rectifier, 3 hard-clipping stage\n// Based on: https://github.com/hazza-music/EHX-Big-Muff-Pi-Emulation/blob/main/Technical%20Essay.pdf\n// \nclass FuzzProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 5,\n\t\t\tminValue: 1\n\t\t}]\n\t}\n\n\tconstructor(){ \n\t\tsuper(); \n\t\t// history for onepole filter for dcblocking\n\t\tthis.history = [0, 0];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tconst gain = parameters.amount[0];\n\t\tconst makeup = Math.max((1 - Math.pow((gain-1) / 63, 0.13)) * 0.395 + 0.605, 0.605);\n\n\t\tif (input.length > 0){\n\t\t\tfor (let channel = 0; channel < input.length; channel++){\n\t\t\t\tfor (let i = 0; i < input[channel].length; i++){\n\t\t\t\t\t// soft-clipping\n\t\t\t\t\tconst sc = Math.atan(input[channel][i] * gain * 2) * 0.6;\n\t\t\t\t\t// half-wave rectification and add for \n\t\t\t\t\t// asymmetric distortion\n\t\t\t\t\tconst hw = ((sc > 0) ? sc : 0) + input[channel][i];\n\t\t\t\t\t// hard-clipping\n\t\t\t\t\tconst hc = Math.max(-0.707, Math.min(0.707, hw));\n\t\t\t\t\t// onepole lowpass filter for dc-block\n\t\t\t\t\tthis.history[channel] = (hc - this.history[channel]) * 0.0015 + this.history[channel];\n\t\t\t\t\t// dc-block and gain compensation and output\n\t\t\t\t\toutput[channel][i] = (hc - this.history[channel]) * makeup;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('fuzz-processor', FuzzProcessor);\n\n// A distortion/compression effect of an incoming signal\n// Based on an algorithm by Peter McCulloch\n// \nclass SquashProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn [{\n\t\t\tname: 'amount',\n\t\t\tdefaultValue: 4,\n\t\t\tminValue: 1,\n\t\t\tmaxValue: 1024\n\t\t}, {\n\t\t\tname: 'makeup',\n\t\t\tdefaultValue: 0.5,\n\t\t\tminValue: 0,\n\t\t\tmaxValue: 2\n\t\t}];\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\t\t\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\t// (s * a) / ((s * a)^2 * 0.28 + 1) / √a\n\t\t\t\t\t// drive amount, minimum of 1\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\t// makeup gain\n\t\t\t\t\tconst m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];\n\t\t\t\t\t// set the waveshaper effect\n\t\t\t\t\tconst s = input[channel][i];\n\t\t\t\t\tconst x = s * a * 1.412;\n\t\t\t\t\toutput[channel][i] = (x / (x * x * 0.28 + 1.0)) * m * 0.708;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('squash-processor', SquashProcessor);\n\n// Comb Filter processor\n// A LowPass FeedBack CombFilter effect (LBCF)\n// Uses a onepole lowpass filter in the feedback delay for damping\n// Feedback amount can be positive or negative \n// (negative creates odd harmonics one octave lower)\n// \nclass CombFilterProcessor extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [\n\t\t\t[ 'time', 5, 0, 120, \"k-rate\" ],\n\t\t\t[ 'feedback', 0.8, -0.999, 0.999, \"k-rate\" ],\n\t\t\t[ 'damping', 0.5, 0, 1, \"k-rate\" ],\n\t\t\t[ 'drywet', 0.8, 0, 1, \"k-rate\" ]\n\t\t].map(x => new Object({\n\t\t\tname: x[0],\n\t\t\tdefaultValue: x[1],\n\t\t\tminValue: x[2],\n\t\t\tmaxValue: x[3],\n\t\t\tautomationRate: x[4]\n\t\t}));\n\t}\n\t\n\tconstructor(info) {\n\t\tsuper();\n\n\t\tconst numChannels = info.channelCount;\n\t\tconst delaySize = 120;\n\t\t// make delays for amount of channels and\n\t\t// initialize history values for lowpass\n\t\tthis.delays = [];\n\t\tthis.lpf = [];\n\t\tfor (let i = 0; i < numChannels; i++){\n\t\t\tthis.delays[i] = this.makeDelay(delaySize);\n\t\t\tthis.lpf[i] = 0;\n\t\t}\n\t}\n\n\t// makeDelay code based on Dattorro Reverberator delays\n\t// Thanks to khoin: https://github.com/khoin\n\tmakeDelay(length) {\n\t\tlet size = Math.round(length * 0.001 * sampleRate);\n\t\tlet nextPow2 = 2 ** Math.ceil(Math.log2((size)));\n\t\treturn [\n\t\t\tnew Float32Array(nextPow2), nextPow2-1, 0, nextPow2 - 1\n\t\t];\n\t}\n\t// write to specific delayline at delaysize\n\twriteDelay(i, data) {\n\t\treturn this.delays[i][0][this.delays[i][1]] = data;\n\t}\n\n\t// read from delayline at specified time\n\treadDelayAt(i, ms) {\n\t\tlet s = Math.round(ms * 0.001 * sampleRate);\n\t\treturn this.delays[i][0][(this.delays[i][2] - s) & this.delays[i][3]];\n\t}\n\n\t// move the read and writeheads of the delayline\n\tupdateReadWriteHeads(i){\n\t\t// increment read and write heads in delay and wrap at delaysize\n\t\tthis.delays[i][1] = (this.delays[i][1] + 1) & this.delays[i][3];\n\t\tthis.delays[i][2] = (this.delays[i][2] + 1) & this.delays[i][3];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tconst dt = parameters.time[0];\n\t\tconst fb = parameters.feedback[0];\n\t\tconst dm = Math.max(0, parameters.damping[0]);\n\t\tconst dw = parameters.drywet[0];\n\n\t\t// process for every channel and every sample in the channel\n\t\tif (input.length > 0){\n\t\t\tfor (let channel = 0; channel < input.length; channel++){\n\t\t\t\tfor (let i = 0; i < input[0].length; i++){\n\t\t\t\t\t// a onepole lowpass filter after delay\n\t\t\t\t\tthis.lpf[channel] = this.readDelayAt(channel, dt) * (1 - dm) + this.lpf[channel] * dm;\n\t\t\t\t\t// write to the delayline \n\t\t\t\t\tthis.writeDelay(channel, input[channel][i] + this.lpf[channel] * fb);\n\t\t\t\t\t// apply drywet and send output from the filter\n\t\t\t\t\toutput[channel][i] = this.lpf[channel] * dw + input[channel][i] * (1-dw);\n\t\t\t\t\t// update the read and write heads of the delaylines\n\t\t\t\t\tthis.updateReadWriteHeads(channel);\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn true;\n\t}\n}\nregisterProcessor('combfilter-processor', CombFilterProcessor);\n\n// Dattorro Reverberator\n// Thanks to port by khoin, taken from:\n// https://github.com/khoin/DattorroReverbNode\n// based on the paper from Jon Dattorro:\n// https://ccrma.stanford.edu/~dattorro/EffectDesignPart1.pdf\n// with small modifications to work in Mercury\n//\n// In jurisdictions that recognize copyright laws, this software is to\n// be released into the public domain.\n\n// THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND.\n// THE AUTHOR(S) SHALL NOT BE LIABLE FOR ANYTHING, ARISING FROM, OR IN\n// CONNECTION WITH THE SOFTWARE OR THE DISTRIBUTION OF THE SOFTWARE.\n// \nclass DattorroReverb extends AudioWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn [\n\t\t\t[\"preDelay\", 0, 0, sampleRate - 1, \"k-rate\"],\n\t\t\t// [\"bandwidth\", 0.9999, 0, 1, \"k-rate\"],\t\n\t\t\t[\"inputDiffusion1\", 0.75, 0, 1, \"k-rate\"],\n\t\t\t[\"inputDiffusion2\", 0.625, 0, 1, \"k-rate\"],\n\t\t\t[\"decay\", 0.5, 0, 1, \"k-rate\"],\n\t\t\t[\"decayDiffusion1\", 0.7, 0, 0.999999, \"k-rate\"],\n\t\t\t[\"decayDiffusion2\", 0.5, 0, 0.999999, \"k-rate\"],\n\t\t\t[\"damping\", 0.005, 0, 1, \"k-rate\"],\n\t\t\t[\"excursionRate\", 0.5, 0, 2, \"k-rate\"],\n\t\t\t[\"excursionDepth\", 0.7, 0, 2, \"k-rate\"],\n\t\t\t[\"wet\", 0.7, 0, 2, \"k-rate\"],\n\t\t\t// [\"dry\", 0.7, 0, 2, \"k-rate\"]\n\t\t].map(x => new Object({\n\t\t\tname: x[0],\n\t\t\tdefaultValue: x[1],\n\t\t\tminValue: x[2],\n\t\t\tmaxValue: x[3],\n\t\t\tautomationRate: x[4]\n\t\t}));\n\t}\n\n\tconstructor(options) {\n\t\tsuper(options);\n\n\t\tthis._Delays = [];\n\t\t// Pre-delay is always one-second long, rounded to the nearest 128-chunk\n\t\tthis._pDLength = sampleRate + (128 - sampleRate % 128);\n\t\tthis._preDelay = new Float32Array(this._pDLength);\n\t\tthis._pDWrite = 0;\n\t\tthis._lp1 = 0.0;\n\t\tthis._lp2 = 0.0;\n\t\tthis._lp3 = 0.0;\n\t\tthis._excPhase = 0.0;\n\n\t\t[\n\t\t\t0.004771345, 0.003595309, 0.012734787, 0.009307483, // pre-tank\n\t\t\t0.022579886, 0.149625349, 0.060481839, 0.1249958, // left-loop\n\t\t\t0.030509727, 0.141695508, 0.089244313, 0.106280031 // right-loop\n\t\t].forEach(x => this.makeDelay(x));\n\n\t\tthis._taps = Int16Array.from([\n\t\t\t0.008937872, 0.099929438, 0.064278754, 0.067067639, \n\t\t\t0.066866033, 0.006283391, 0.035818689, // left-output\n\t\t\t0.011861161, 0.121870905, 0.041262054, 0.08981553, \n\t\t\t0.070931756, 0.011256342, 0.004065724 // right-output\n\t\t], x => Math.round(x * sampleRate));\n\t}\n\n\tmakeDelay(length) {\n\t\t// len, array, write, read, mask\n\t\tlet len = Math.round(length * sampleRate);\n\t\tlet nextPow2 = 2 ** Math.ceil(Math.log2((len)));\n\t\tthis._Delays.push([\n\t\t\tnew Float32Array(nextPow2), len - 1, 0 | 0, nextPow2 - 1\n\t\t]);\n\t}\n\n\twriteDelay(index, data) {\n\t\treturn this._Delays[index][0][this._Delays[index][1]] = data;\n\t}\n\n\treadDelay(index) {\n\t\treturn this._Delays[index][0][this._Delays[index][2]];\n\t}\n\n\treadDelayAt(index, i) {\n\t\tlet d = this._Delays[index];\n\t\treturn d[0][(d[2] + i) & d[3]];\n\t}\n\n\t// cubic interpolation\n\t// O. Niemitalo: \n\t// https://www.musicdsp.org/en/latest/Other/49-cubic-interpollation.html\n\treadDelayCAt(index, i) {\n\t\tlet d = this._Delays[index],\n\t\t\tfrac = i - ~~i,\n\t\t\tint = ~~i + d[2] - 1,\n\t\t\tmask = d[3];\n\n\t\tlet x0 = d[0][int++ & mask],\n\t\t\tx1 = d[0][int++ & mask],\n\t\t\tx2 = d[0][int++ & mask],\n\t\t\tx3 = d[0][int & mask];\n\n\t\tlet a = (3 * (x1 - x2) - x0 + x3) / 2,\n\t\t\tb = 2 * x2 + x0 - (5 * x1 + x3) / 2,\n\t\t\tc = (x2 - x0) / 2;\n\n\t\treturn (((a * frac) + b) * frac + c) * frac + x1;\n\t}\n\n\t// First input will be downmixed to mono if number of channels is not 2\n\t// Outputs Stereo.\n\tprocess(inputs, outputs, parameters) {\n\t\tconst pd = ~~parameters.preDelay[0],\n\t\t\t// bw = parameters.bandwidth[0], // replaced by using damping\n\t\t\tfi = parameters.inputDiffusion1[0],\n\t\t\tsi = parameters.inputDiffusion2[0],\n\t\t\tdc = parameters.decay[0],\n\t\t\tft = parameters.decayDiffusion1[0],\n\t\t\tst = parameters.decayDiffusion2[0],\n\t\t\tdp = 1 - parameters.damping[0],\n\t\t\tex = parameters.excursionRate[0] / sampleRate,\n\t\t\ted = parameters.excursionDepth[0] * sampleRate / 1000,\n\t\t\twe = parameters.wet[0]; //* 0.6, // lo & ro both mult. by 0.6 anyways\n\t\t\t// dr = parameters.dry[0];\n\n\t\t// write to predelay and dry output\n\t\tif (inputs[0].length == 2) {\n\t\t\tfor (let i = 127; i >= 0; i--) {\n\t\t\t\tthis._preDelay[this._pDWrite + i] = (inputs[0][0][i] + inputs[0][1][i]) * 0.5;\n\n\t\t\t\t// removed the dry parameter, this is handled in the Tone Node\n\t\t\t\t// outputs[0][0][i] = inputs[0][0][i] * dr;\n\t\t\t\t// outputs[0][1][i] = inputs[0][1][i] * dr;\n\t\t\t}\n\t\t} else if (inputs[0].length > 0) {\n\t\t\tthis._preDelay.set(\n\t\t\t\tinputs[0][0],\n\t\t\t\tthis._pDWrite\n\t\t\t);\n\t\t\t// for (let i = 127; i >= 0; i--)\n\t\t\t// \toutputs[0][0][i] = outputs[0][1][i] = inputs[0][0][i] * dr;\n\t\t} else {\n\t\t\tthis._preDelay.set(\n\t\t\t\tnew Float32Array(128),\n\t\t\t\tthis._pDWrite\n\t\t\t);\n\t\t}\n\n\t\tlet i = 0 | 0;\n\t\twhile (i < 128) {\n\t\t\tlet lo = 0.0,\n\t\t\t\tro = 0.0;\n\n\t\t\t// input damping (formerly known as bandwidth bw, now uses dp)\n\t\t\tthis._lp1 += dp * (this._preDelay[(this._pDLength + this._pDWrite - pd + i) % this._pDLength] - this._lp1);\n\n\t\t\t// pre-tank\n\t\t\tlet pre = this.writeDelay(0, this._lp1 - fi * this.readDelay(0));\n\t\t\tpre = this.writeDelay(1, fi * (pre - this.readDelay(1)) + this.readDelay(0));\n\t\t\tpre = this.writeDelay(2, fi * pre + this.readDelay(1) - si * this.readDelay(2));\n\t\t\tpre = this.writeDelay(3, si * (pre - this.readDelay(3)) + this.readDelay(2));\n\n\t\t\tlet split = si * pre + this.readDelay(3);\n\n\t\t\t// excursions\n\t\t\t// could be optimized?\n\t\t\tlet exc = ed * (1 + Math.cos(this._excPhase * 6.2800));\n\t\t\tlet exc2 = ed * (1 + Math.sin(this._excPhase * 6.2847));\n\n\t\t\t// left loop\n\t\t\t// tank diffuse 1\n\t\t\tlet temp = this.writeDelay(4, split + dc * this.readDelay(11) + ft * this.readDelayCAt(4, exc));\n\t\t\t// long delay 1\n\t\t\tthis.writeDelay(5, this.readDelayCAt(4, exc) - ft * temp);\n\t\t\t// damp 1\n\t\t\tthis._lp2 += dp * (this.readDelay(5) - this._lp2);\n\t\t\ttemp = this.writeDelay(6, dc * this._lp2 - st * this.readDelay(6)); // tank diffuse 2\n\t\t\t// long delay 2\n\t\t\tthis.writeDelay(7, this.readDelay(6) + st * temp);\n\n\t\t\t// right loop \n\t\t\t// tank diffuse 3\n\t\t\ttemp = this.writeDelay(8, split + dc * this.readDelay(7) + ft * this.readDelayCAt(8, exc2));\n\t\t\t// long delay 3\n\t\t\tthis.writeDelay(9, this.readDelayCAt(8, exc2) - ft * temp);\n\t\t\t// damp 2\n\t\t\tthis._lp3 += dp * (this.readDelay(9) - this._lp3);\n\t\t\t// tank diffuse 4\n\t\t\ttemp = this.writeDelay(10, dc * this._lp3 - st * this.readDelay(10));\n\t\t\t// long delay 4\n\t\t\tthis.writeDelay(11, this.readDelay(10) + st * temp);\n\n\t\t\tlo = this.readDelayAt(9, this._taps[0]) +\n\t\t\t\tthis.readDelayAt(9, this._taps[1]) -\n\t\t\t\tthis.readDelayAt(10, this._taps[2]) +\n\t\t\t\tthis.readDelayAt(11, this._taps[3]) -\n\t\t\t\tthis.readDelayAt(5, this._taps[4]) -\n\t\t\t\tthis.readDelayAt(6, this._taps[5]) -\n\t\t\t\tthis.readDelayAt(7, this._taps[6]);\n\n\t\t\tro = this.readDelayAt(5, this._taps[7]) +\n\t\t\t\tthis.readDelayAt(5, this._taps[8]) -\n\t\t\t\tthis.readDelayAt(6, this._taps[9]) +\n\t\t\t\tthis.readDelayAt(7, this._taps[10]) -\n\t\t\t\tthis.readDelayAt(9, this._taps[11]) -\n\t\t\t\tthis.readDelayAt(10, this._taps[12]) -\n\t\t\t\tthis.readDelayAt(11, this._taps[13]);\n\n\t\t\toutputs[0][0][i] += lo * we;\n\t\t\toutputs[0][1][i] += ro * we;\n\n\t\t\tthis._excPhase += ex;\n\n\t\t\ti++;\n\n\t\t\tfor (let j = 0, d = this._Delays[0]; j < this._Delays.length; d = this._Delays[++j]) {\n\t\t\t\td[1] = (d[1] + 1) & d[3];\n\t\t\t\td[2] = (d[2] + 1) & d[3];\n\t\t\t}\n\t\t}\n\n\t\t// Update preDelay index\n\t\tthis._pDWrite = (this._pDWrite + 128) % this._pDLength;\n\n\t\treturn true;\n\t}\n}\nregisterProcessor('dattorro-reverb', DattorroReverb);\n";
+const fxExtensions = "\n// Constants for calculations\nconst MAX_DEF = +340282346638528859811704183484516925440;\nconst MIN_DEF = -340282346638528859811704183484516925440;\n\n// Some helper functions\nconst PI = Math.PI;\nconst TWOPI = Math.PI * 2.0;\nconst SR = sampleRate;\nconst INV_SR = 1 / sampleRate;\nconst BLOCKSIZE = 128;\n\n// Wrap the phase between 0 and 1\nfunction phaseWrap(phase){\n\tif (phase >= 1.0){\n\t\tphase -= 1.0;\n\t} else if (phase < 0.0){\n\t\tphase += 1.0;\n\t}\n\treturn phase;\n}\n\n// Some helper functions\n// Mix two signals with linear interpolation\nconst mix = (a=0, b=0, x=0.5) => a + ((b - a) * x);\n// function to retrieve a parameter value from array if any exists\nconst pv = (param, i) => param[i] ?? param[0];\n// get the sign of the signal -1/1\nconst sign = (sig) => sig < 0 ? -1 : 1;\n// truncate the signal (removing fractional component)\nconst trunc = (sig) => sig | 0;\n// return the fractional component of a signal\nconst fract = (sig) => sig - trunc(sig);\n// fix Not a Number\nconst fixnan = (sig) => isNaN(sig) ? 0 : sig;\n// Mix two signals with equal power gain\nconst equalPowerMix = (a=0, b=0, x=0.5) => {\n\treturn a * Math.cos(x * 0.5 * PI) + b * Math.cos((x * 0.5 - 0.5) * PI);\n}\n\n// Format descriptors and return to output\nfunction formatDescriptors(descriptors=[]){\n\treturn descriptors.map(x => new Object({\n\t\tname: x[0],\n\t\tdefaultValue: x[1],\n\t\tminValue: x[2],\n\t\tmaxValue: x[3],\n\t\tautomationRate: x[4]\n\t}));\n}\n\n// The extended worklet processor contains a few base functionalities\n// for all the other processors to be used.\n// \nclass ExtendedWorkletProcessor extends AudioWorkletProcessor {\n\tconstructor(options){\n\t\tsuper(options);\n\t\t// is the processor running? use as return in process()\n\t\tthis.running = true;\n\t\tthis.port.onmessage = (e) => {\n\t\t\t// dispose on node.port.postMessage('dispose')\n\t\t\tif (e.data === 'dispose'){ \n\t\t\t\tthis.running = false; \n\t\t\t\t// console.log('disposed workletprocessor', this);\n\t\t\t}\n\t\t}\n\t}\n\t// Template for parent class processing, overwrite this in the parent class\n\t// process(inputs, outputs, parameters){\n\t// \tconst input = inputs[0];\n\t// \tconst output = outputs[0];\n\t\n\t// \tif (input.length > 0){\n\t// \t\t// for every channel\n\t// \t\tfor (let channel = 0; channel < input.length; channel++){\n\t// \t\t\t// for the length of the sample array (generally 128)\n\t// \t\t\tfor (let i = 0; i < input[0].length; i++){\n\t// \t\t\t\toutput[channel][i] = input[channel][i];\n\t// \t\t\t}\n\t// \t\t}\n\t// \t}\n\t// \treturn this.running;\n\t// }\n}\n\n// The DelayWorkletProcessor is a baseclass that includes various functions for\n// generating a delayline within an audioworklet.\n// \nclass DelayWorkletProcessor extends ExtendedWorkletProcessor {\n\tconstructor(options){\n\t\tsuper(options);\n\t}\n\t// initialize a delayline with maximum size in milliseconds\n\t// makeDelay code based on Dattorro Reverberator delays\n\t// Thanks to khoin: https://github.com/khoin\n\tmakeDelay(length) {\n\t\tlet size = Math.round(length * 0.001 * sampleRate);\n\t\tlet nextPow2 = 2 ** Math.ceil(Math.log2((size)));\n\t\treturn [\n\t\t\t// [0] delay array, [1] write-head, [2] read-head, [3] delaysize\n\t\t\tnew Float32Array(nextPow2), nextPow2-1, 0 | 0, nextPow2 - 1\n\t\t];\n\t}\n\t// write to specific delayline at delaysize\n\twriteDelay(i, data) {\n\t\treturn this.delays[i][0][this.delays[i][1]] = data;\n\t}\n\t// read from delayline at specified time in milliseconds\n\treadDelayAt(i, ms) {\n\t\tlet s = Math.round(ms * 0.001 * sampleRate);\n\t\treturn this.delays[i][0][(this.delays[i][2] - s) & this.delays[i][3]];\n\t}\n\t// read from a delayline with linear interpolation in delaytimes\n\tlerpDelayAt(i, ms){\n\t\tlet dt = ms * 0.001 * sampleRate;\n\t\tlet p = trunc(dt);\n\t\tlet x = fract(dt);\n\n\t\tlet d0 = this.delays[i][0][(this.delays[i][2] - p & this.delays[i][3])];\n\t\tlet d1 = this.delays[i][0][(this.delays[i][2]-(p+1) & this.delays[i][3])];\n\t\treturn mix(d0, d1, x);\n\t}\n\t// read from delayline with cubic interpolation at specified time in ms\n\t// Cubic interpolation from: O. Niemitalo:\n\t// https://www.musicdsp.org/en/latest/Other/49-cubic-interpollation.html\n\treadDelayCAt(i, ms) {\n\t\tlet s = ms * 0.001 * sampleRate;\n\n\t\tlet d = this.delays[i],\n\t\t\tfrac = s - ~~s,\n\t\t\tint = ~~s + d[2] - 1,\n\t\t\tmask = d[3];\n\n\t\tlet x0 = d[0][int++ & mask],\n\t\t\tx1 = d[0][int++ & mask],\n\t\t\tx2 = d[0][int++ & mask],\n\t\t\tx3 = d[0][int & mask];\n\n\t\tlet a = (3 * (x1 - x2) - x0 + x3) / 2,\n\t\t\tb = 2 * x2 + x0 - (5 * x1 + x3) / 2,\n\t\t\tc = (x2 - x0) / 2;\n\n\t\treturn (((a * frac) + b) * frac + c) * frac + x1;\n\t}\n\t// move the read and writeheads of the delayline\n\tupdateReadWriteHeads(i){\n\t\t// increment read and write heads in delay and wrap at delaysize\n\t\tthis.delays[i][1] = (this.delays[i][1] + 1) & this.delays[i][3];\n\t\tthis.delays[i][2] = (this.delays[i][2] + 1) & this.delays[i][3];\n\t}\n}\n\n// Various noise type processors for the MonoNoise source\n// Type 2 is Pink noise, used from Tone.Noise('pink') instead of calc\n//\nclass NoiseProcessor extends ExtendedWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn formatDescriptors([\n\t\t\t[ 'type', 5, 0, 5, 'a-rate' ],\n\t\t\t[ 'density', 0.125, 0, 1, 'a-rate' ]\n\t\t]);\n\t}\n\t\n\tconstructor(){\n\t\tsuper();\n\t\t// sample previous value\n\t\tthis.prev = 0;\n\t\t// latch to a sample \n\t\tthis.latch = 0;\n\t\t// phasor ramp\n\t\tthis.phasor = 0;\n\t\tthis.delta = 0;\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\t// input is not used because this is a source\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\t\tconst HALF_PI = Math.PI/2;\n\n\t\t// for one output channel generate some noise\t\n\t\tif (input.length > 0){\n\t\t\tfor (let i = 0; i < input[0].length; i++){\n\t\t\t\tconst t = (parameters.type.length > 1) ? parameters.type[i] : parameters.type[0];\n\t\t\t\tconst d = (parameters.density.length > 1) ? parameters.density[i] : parameters.density[0];\n\t\t\t\n\t\t\t\t// some bipolar white noise -1 to 1\n\t\t\t\tconst biNoise = Math.random() * 2 - 1;\n\t\t\t\t// empty output\n\t\t\t\tlet out = 0;\n\n\t\t\t\t// White noise, Use for every other choice\n\t\t\t\tif (t < 1){\n\t\t\t\t\tout = biNoise * 0.707;\n\t\t\t\t}\n\t\t\t\t// Pink noise,  use Tone.Noise('pink') object for simplicity\n\t\t\t\telse if (t < 2){\n\t\t\t\t\tout = input[0][i] * 1.413;\n\t\t\t\t}\n\t\t\t\t// Brownian noise\n\t\t\t\t// calculate a random next value in \"step size\" and add to \n\t\t\t\t// the previous noise signal value creating a \"drunk walk\" \n\t\t\t\t// or brownian motion\n\t\t\t\telse if (t < 3){\t\t\n\t\t\t\t\tthis.prev += biNoise * d*d;\n\t\t\t\t\tthis.prev = Math.asin(Math.sin(this.prev * HALF_PI)) / HALF_PI;\n\t\t\t\t\tout = this.prev * 0.7079;\n\t\t\t\t}\n\t\t\t\t// Lo-Fi (sampled) noise\n\t\t\t\t// creates random values at a specified frequency and slowly \n\t\t\t\t// ramps to that new value\n\t\t\t\telse if (t < 4){\n\t\t\t\t\t// create a ramp from 0-1 at specific frequency/density\n\t\t\t\t\tthis.phasor = (this.phasor + d * d * 0.5) % 1;\n\t\t\t\t\t// calculate the delta\n\t\t\t\t\tlet dlt = this.phasor - this.delta;\n\t\t\t\t\tthis.delta = this.phasor;\n\t\t\t\t\t// when ramp resets, latch a new noise value\n\t\t\t\t\tif (dlt < 0){\n\t\t\t\t\t\tthis.prev = this.latch;\n\t\t\t\t\t\tthis.latch = biNoise;\n\t\t\t\t\t}\n\t\t\t\t\t// linear interpolation from previous to next point\n\t\t\t\t\tout = this.prev + this.phasor * (this.latch - this.prev);\n\t\t\t\t\tout *= 0.7079;\n\t\t\t\t}\n\t\t\t\t// Dust noise\n\t\t\t\t// randomly generate an impulse/click of value 1 depending \n\t\t\t\t// on the density, average amount of impulses per second\n\t\t\t\telse if (t < 5){\n\t\t\t\t\tout = Math.random() > (1 - d*d*d * 0.5);\n\t\t\t\t}\n\t\t\t\t// Crackle noise\n\t\t\t\t// Pink generator with \"wave-loss\" leaving gaps\n\t\t\t\telse {\n\t\t\t\t\tlet delta = input[0][i] - this.prev;\n\t\t\t\t\tthis.prev = input[0][i];\n\t\t\t\t\tif (delta > 0){\n\t\t\t\t\t\tthis.latch = Math.random();\n\t\t\t\t\t}\n\t\t\t\t\tout = (this.latch < (1 - d*d*d)) ? 0 : input[0][i] * 1.413;\n\t\t\t\t}\n\t\t\t\t// send to output whichever noise type was chosen\n\t\t\t\toutput[0][i] = out;\n\t\t\t}\n\t\t}\t\t\n\t\treturn this.running;\n\t}\n}\nregisterProcessor('noise-processor', NoiseProcessor);\n\n// An FM Synth Processor consisting of a carrier and modulator (operator)\n// Set the carrier frequency in Hz and specify the modulator frequency \n// in Harmonicity (ratio). Set the modulation depth as Index \n// (ratio to the harmonicity). \nclass FMProcessor extends ExtendedWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn formatDescriptors([\n\t\t\t[ 'frequency', 200, 0, 22050, 'a-rate' ],\n\t\t\t[ 'harmonicity', 2, 0, MAX_DEF, 'k-rate' ],\n\t\t\t[ 'index', 2, 0, MAX_DEF, 'k-rate' ],\n\t\t\t[ 'modAmp', 0, 0, 1, 'a-rate' ],\n\t\t\t[ 'voices', 1, 1, 11, 'k-rate' ],\n\t\t\t[ 'detune', 0, 0, 24, 'k-rate' ]\n\t\t]);\n\t}\n\n\tconstructor(options){\n\t\tsuper(options);\n\t\t// for the phases of the fm synth and voices\n\t\tthis.carrier = [];\n\t\tthis.modulator = [];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\t// this is a source, so no inputs\n\t\tconst output = outputs[0];\n\n\t\t// const base = parameters.frequency[0];\n\t\tconst harm = parameters.harmonicity[0];\n\t\tconst indx = parameters.index[0];\n\n\t\tconst vcs = parameters.voices[0];\n\t\tconst dtn = parameters.detune[0];\n\n\t\tconst cmp = 1 / Math.pow(vcs, 0.5);\n\n\t\tif (output.length > 0){\n\t\t\tfor (let i = 0; i < output[0].length; i++){\n\t\t\t\tconst base = parameters.frequency[i] ?? parameters.frequency[0];\n\t\t\t\tconst modA = parameters.modAmp[i] ?? parameters.modAmp[0];\n\t\t\t\t\n\t\t\t\tlet sum = 0;\n\t\t\t\tfor (let v = 0; v < vcs; v++){\n\t\t\t\t\t// get the index for the detuning factor\n\t\t\t\t\tconst id = v - Math.floor(vcs / 2);\n\t\t\t\t\t\n\t\t\t\t\tconst carF = base * Math.pow(2, -dtn * id / 12);\n\t\t\t\t\tconst modF = carF * harm;\n\t\t\t\t\tconst modD = modF * indx;\n\t\t\t\t\t\n\t\t\t\t\t// initialize in a random phase if not 0\n\t\t\t\t\tthis.carrier[v] = this.carrier[v] ?? Math.random();\n\t\t\t\t\tthis.modulator[v] = this.modulator[v] ?? Math.random();\n\t\t\t\t\t\n\t\t\t\t\t// calculate the modulator sinewave\n\t\t\t\t\tconst mod = Math.cos(this.modulator[v] * TWOPI) * modA * modA;\n\t\t\t\t\t\n\t\t\t\t\t// the carrier increments by the: base + modulator * depth \n\t\t\t\t\tthis.carrier[v] += (carF + mod * modD) * INV_SR;\n\t\t\t\t\tphaseWrap(this.carrier[v]);\n\t\t\t\t\t// the modulator increments by the: base freq * harmonicity\n\t\t\t\t\tthis.modulator[v] += modF * INV_SR;\n\t\t\t\t\tphaseWrap(this.modulator[v]);\n\t\t\t\t\t\n\t\t\t\t\t// calclate the carrier oscillator and add to total\n\t\t\t\t\tsum += Math.cos(this.carrier[v] * TWOPI);\n\t\t\t\t}\n\t\t\t\t// output the signal\n\t\t\t\toutput[0][i] = sum * cmp;\n\t\t\t}\n\t\t}\n\t\treturn this.running;\n\t}\n}\nregisterProcessor('fm-processor', FMProcessor);\n\n// A Downsampling Chiptune effect. Downsamples the signal by a specified amount\n// Resulting in a lower samplerate, making it sound more like 8bit/chiptune\n// Programmed with a custom AudioWorkletProcessor, see effects/Processors.js\n//\nclass DownSampleProcessor extends ExtendedWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn formatDescriptors([\n\t\t\t[ 'down', 8, 1, 2048, 'a-rate' ],\n\t\t\t[ 'drywet', 1, 0, 1, 'a-rate' ]\n\t\t]);\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t\t// the frame counter\n\t\tthis.count = 0;\n\t\t// sample and hold variable array\n\t\tthis.sah = [];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\t// if there is anything to process\n\t\tif (input.length > 0){\n\t\t\t// for the length of the sample array (generally 128)\n\t\t\tfor (let i=0; i<input[0].length; i++){\n\t\t\t\tconst d = parameters.down[i] ?? parameters.down[0];\n\t\t\t\tconst dw = parameters.drywet[i] ?? parameters.drywet[0];\n\n\t\t\t\t// for every channel\n\t\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\t\t// if counter equals 0, sample and hold\n\t\t\t\t\tif (this.count % d === 0){\n\t\t\t\t\t\tthis.sah[channel] = input[channel][i];\n\t\t\t\t\t}\n\t\t\t\t\t// output the currently held sample\n\t\t\t\t\t// apply drywet param\n\t\t\t\t\tconst out = this.sah[channel];\n\t\t\t\t\toutput[channel][i] = mix(input[channel][i], out, dw);\n\t\t\t\t}\n\t\t\t\t// increment sample counter\n\t\t\t\tthis.count++;\n\t\t\t}\n\t\t}\n\t\treturn this.running;\n\t}\n}\nregisterProcessor('downsampler-processor', DownSampleProcessor);\n\n// A distortion algorithm using the arctan function as a \n// waveshaping technique. Some mapping to apply a more equal loudness \n// distortion is applied on the overdrive parameter\n//\nclass ArctanDistortionProcessor extends ExtendedWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn formatDescriptors([\n\t\t\t[ 'amount', 5, 1, MAX_DEF, 'a-rate' ],\n\t\t\t[ 'drywet', 1, 0, 1, 'a-rate' ]\n\t\t]);\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\n\t\t// quarter pi constant and inverse\n\t\tthis.Q_PI = 0.7853981633974483; // 0.25 * Math.PI;\n\t\tthis.INVQ_PI = 1.2732395447351628; //1.0 / this.Q_PI;\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tconst gain = parameters.amount[0];\n\t\tconst makeup = Math.min(1, Math.max(0, 1 - ((Math.atan(gain) - this.Q_PI) * this.INVQ_PI * 0.823)));\n\n\t\tconst dw = parameters.drywet[0];\n\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; channel++){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\tconst out = Math.atan(input[channel][i] * gain) * makeup;\n\t\t\t\t\toutput[channel][i] = mix(input[channel][i], out, dw);\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn this.running;\n\t}\n}\nregisterProcessor('arctan-distortion-processor', ArctanDistortionProcessor);\n\n\n// A fuzz distortion effect in modelled after the Big Muff Pi pedal \n// by Electro Harmonics. Using three stages of distortion: \n// 1 soft-clipping stage, 2 half-wave rectifier, 3 hard-clipping stage\n// Based on: https://github.com/hazza-music/EHX-Big-Muff-Pi-Emulation/blob/main/Technical%20Essay.pdf\n// \nclass FuzzProcessor extends ExtendedWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn formatDescriptors([\n\t\t\t[ 'amount', 5, 1, MAX_DEF, 'a-rate' ],\n\t\t\t[ 'drywet', 1, 0, 1, 'a-rate' ]\n\t\t]);\n\t}\n\n\tconstructor(){ \n\t\tsuper(); \n\t\t// history for onepole filter for dcblocking\n\t\tthis.history = [0, 0];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tconst gain = parameters.amount[0];\n\t\tconst makeup = Math.max((1 - Math.pow((gain-1) / 63, 0.13)) * 0.395 + 0.605, 0.605);\n\t\tconst dw = parameters.drywet[0];\n\n\t\tif (input.length > 0){\n\t\t\tfor (let channel = 0; channel < input.length; channel++){\n\t\t\t\tfor (let i = 0; i < input[channel].length; i++){\n\t\t\t\t\t// soft-clipping\n\t\t\t\t\tconst sc = Math.atan(input[channel][i] * gain * 2) * 0.6;\n\t\t\t\t\t// half-wave rectification and add for \n\t\t\t\t\t// asymmetric distortion\n\t\t\t\t\tconst hw = ((sc > 0) ? sc : 0) + input[channel][i];\n\t\t\t\t\t// hard-clipping\n\t\t\t\t\tconst hc = Math.max(-0.707, Math.min(0.707, hw));\n\t\t\t\t\t// onepole lowpass filter for dc-block\n\t\t\t\t\tthis.history[channel] = (hc - this.history[channel]) * 0.0015 + this.history[channel];\n\t\t\t\t\t// dc-block and gain compensation and output\n\t\t\t\t\tconst out = (hc - this.history[channel]) * makeup;\n\t\t\t\t\t// apply drywet crossfade\n\t\t\t\t\toutput[channel][i] = mix(input[channel][i], out, dw);\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn this.running;\n\t}\n}\nregisterProcessor('fuzz-processor', FuzzProcessor);\n\n// A distortion/compression effect of an incoming signal\n// Based on an algorithm by Peter McCulloch\n// \nclass SquashProcessor extends ExtendedWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn formatDescriptors([\n\t\t\t[ 'amount', 4, 1, 1024, 'a-rate' ],\n\t\t\t[ 'makeup', 0.5, 0, 2, 'a-rate' ],\n\t\t\t[ 'drywet', 1, 0, 1, 'a-rate' ]\n\t\t]);\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\t\t\n\t\tif (input.length > 0){\n\t\t\tfor (let channel=0; channel<input.length; ++channel){\n\t\t\t\tfor (let i=0; i<input[channel].length; i++){\n\t\t\t\t\t// (s * a) / ((s * a)^2 * 0.28 + 1) / √a\n\t\t\t\t\t// drive amount, minimum of 1\n\t\t\t\t\tconst a = (parameters.amount.length > 1)? parameters.amount[i] : parameters.amount[0];\n\t\t\t\t\t// makeup gain\n\t\t\t\t\tconst m = (parameters.makeup.length > 1)? parameters.makeup[i] : parameters.makeup[0];\n\t\t\t\t\t// drywet balance\n\t\t\t\t\tconst dw = (parameters.drywet.length > 1)? parameters.drywet[i] : parameters.drywet[0];\n\t\t\t\t\t// set the waveshaper effect\n\t\t\t\t\tconst s = input[channel][i];\n\t\t\t\t\tconst x = s * a * 1.412;\n\t\t\t\t\tconst out = (x / (x * x * 0.28 + 1.0)) * m * 0.708;\n\t\t\t\t\toutput[channel][i] = mix(input[channel][i], out, dw);\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn this.running;\n\t}\n}\nregisterProcessor('squash-processor', SquashProcessor);\n\n// Waveloss FX\n// The waveloss effect gradually drops sound (reduces it to 0) between detected\n// zero-crossings in the signal. This is based on a probability. The amount\n// increases the probability that the signal will be dropped.\n// Inspired by Supercollider waveloss function. \n// The technique was described by Trevor Wishart in a lecture.\n// \nclass WavelossProcessor extends ExtendedWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn formatDescriptors([\n\t\t\t['amount', 0.5, 0, 1, 'k-rate'],\n\t\t\t['drywet', 1, 0, 1, 'k-rate']\n\t\t])\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\n\t\tthis.prev = [];\n\t\tthis.prob = [];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\t\tconst amt = parameters.amount[0];\n\n\t\tif (input.length > 0){\n\t\t\tfor (let c = 0; c < input.length; c++){\n\t\t\t\tthis.prob[c] = this.prob[c] ?? 0;\n\t\t\t\t\n\t\t\t\tfor (let i = 0; i < input[c].length; i++){\n\t\t\t\t\t// take the sign and find the zero-crossing\n\t\t\t\t\tconst sign = (input[c][i] > 0) ? 1 : -1;\n\t\t\t\t\tconst change = sign != (this.prev[c] ?? 0);\n\t\t\t\t\tthis.prev[c] = sign;\n\n\t\t\t\t\t// when zerocrossing, sample from noise for probability\n\t\t\t\t\tif (change){ this.prob[c] = Math.random(); }\n\n\t\t\t\t\t// waveloss when probabilty is higher than amount\n\t\t\t\t\toutput[c][i] = (this.prob[c] > amt) ? input[c][i] : 0;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn this.running;\n\t}\n}\nregisterProcessor('waveloss-processor', WavelossProcessor);\n\n// Hal Chamberlin State Variable Filter. Improved version, basedon the paper:\n// Improving the Digital Chamberlin State Variable Filter\n// Updated version based on the paper https://arxiv.org/pdf/2111.05592\n// by Victor Lazzarini and Joseph Timoney, 2022\n// ported to gen~ and later JS by Timo Hoogland, 2026\n// Other useful resource on SVF: \n// https://www.earlevel.com/main/2003/03/02/the-digital-state-variable-filter/\n// \nclass StateVariableFilter extends ExtendedWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn formatDescriptors([\n\t\t\t[ 'frequency', 500, 0, 18000, \"a-rate\" ],\n\t\t\t[ 'resonance', 0.1, 0.001, 0.999, \"k-rate\" ],\n\t\t\t[ 'type', 0, 0, 3, \"k-rate\" ],\n\t\t]);\n\t}\n\n\tconstructor(){\n\t\tsuper();\n\t\t// history values for single sample feedback\n\t\tthis.h1 = [];\n\t\tthis.h2 = [];\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tconst freq = parameters.frequency[0];\n\t\tconst res = parameters.resonance[0];\n\t\tconst type = parameters.type[0];\n\n\t\tconst Q = Math.pow(res, 6) * 99 + 1;\n\t\tconst q1 = Math.max(0, Math.min(250, Q));\n\t\tconst cf = Math.tan(Math.PI * freq / sampleRate);\n\n\t\tif (input.length > 0){\n\t\t\tfor (let channel = 0; channel < input.length; channel++){\n\t\t\t\t// initalize with 0's;\n\t\t\t\tthis.h1[channel] = this.h1[channel] ?? 0;\n\t\t\t\tthis.h2[channel] = this.h2[channel] ?? 0;\n\t\n\t\t\t\tfor (let i = 0; i < input[channel].length; i++){\n\t\t\t\t\tconst kdiv = 1 + cf / q1 + cf*cf;\n\t\t\t\t\tconst highp = (input[channel][i] - (1 / q1 + cf) * this.h1[channel] - this.h2[channel]) / kdiv;\n\t\n\t\t\t\t\tlet tmp = highp * cf;\n\t\t\t\n\t\t\t\t\tconst bandp = tmp + this.h1[channel];\n\t\t\t\t\tthis.h1[channel] = tmp + bandp;\n\t\t\t\n\t\t\t\t\ttmp = bandp * cf;\n\t\t\t\t\tconst lowp = tmp + this.h2[channel];\n\t\t\t\t\tthis.h2[channel] = tmp + lowp;\n\t\t\t\n\t\t\t\t\tif (type < 1){\n\t\t\t\t\t\toutput[channel][i] = lowp;\n\t\t\t\t\t} else if (type < 2){\n\t\t\t\t\t\toutput[channel][i] = highp;\n\t\t\t\t\t} else {\n\t\t\t\t\t\toutput[channel][i] = bandp;\n\t\t\t\t\t} \n\t\t\t\t\t// else {\n\t\t\t\t\t//  notch output disabled\n\t\t\t\t\t// \toutput[channel][i] = highp + lowp; //notch output\n\t\t\t\t\t// }\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn this.running;\n\t}\n}\nregisterProcessor('state-variable-filter', StateVariableFilter);\n\n// Comb Filter processor\n// A LowPass FeedBack CombFilter effect (LBCF)\n// Uses a onepole lowpass filter in the feedback delay for damping\n// Feedback amount can be positive or negative \n// (negative creates odd harmonics one octave lower)\n// \nclass CombFilterProcessor extends DelayWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn formatDescriptors([\n\t\t\t[ 'time', 5, 0, 128, \"k-rate\" ],\n\t\t\t[ 'feedback', 0.8, -0.999, 0.999, \"k-rate\" ],\n\t\t\t[ 'damping', 0.5, 0, 1, \"k-rate\" ],\n\t\t\t[ 'drywet', 0.8, 0, 1, \"k-rate\" ]\n\t\t]);\n\t}\n\t\n\tconstructor(info) {\n\t\tsuper();\n\n\t\tconst numChannels = info.channelCount;\n\t\tconst delaySize = 128;\n\t\t// make delays for amount of channels and\n\t\t// initialize history values for lowpass\n\t\tthis.delays = [];\n\t\tthis.lpf = [];\n\t\tfor (let i = 0; i < numChannels; i++){\n\t\t\tthis.delays[i] = this.makeDelay(delaySize);\n\t\t\tthis.lpf[i] = 0;\n\t\t}\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tconst dt = parameters.time[0];\n\t\tconst fb = parameters.feedback[0];\n\t\tconst dm = Math.max(0, parameters.damping[0]);\n\t\tconst dw = parameters.drywet[0];\n\n\t\t// process for every channel and every sample in the channel\n\t\tif (input.length > 0){\n\t\t\tfor (let channel = 0; channel < input.length; channel++){\n\t\t\t\tfor (let i = 0; i < input[0].length; i++){\n\t\t\t\t\t// a onepole lowpass filter after delay\n\t\t\t\t\tthis.lpf[channel] = this.readDelayAt(channel, dt) * (1 - dm) + this.lpf[channel] * dm;\n\t\t\t\t\t// write to the delayline \n\t\t\t\t\tthis.writeDelay(channel, input[channel][i] + this.lpf[channel] * fb);\n\t\t\t\t\t// apply drywet and send output from the filter\n\t\t\t\t\toutput[channel][i] = this.lpf[channel] * dw + input[channel][i] * (1-dw);\n\t\t\t\t\t// update the read and write heads of the delaylines\n\t\t\t\t\tthis.updateReadWriteHeads(channel);\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t\treturn this.running;\n\t}\n}\nregisterProcessor('combfilter-processor', CombFilterProcessor);\n\n// Stereo Delay FX Processor\nclass StereoDelayProcessor extends DelayWorkletProcessor {\n\tstatic get parameterDescriptors(){\n\t\treturn formatDescriptors([\n\t\t\t[ 'timeL', 333, 0, 5000, \"k-rate\" ],\n\t\t\t[ 'timeR', 444, 0, 5000, \"k-rate\" ],\n\t\t\t[ 'feedback', 0.8, 0, 2, \"k-rate\" ],\n\t\t\t[ 'damping', 0.5, 0, 1, \"k-rate\" ],\n\t\t\t[ 'drywet', 0.4, 0, 1, \"k-rate\" ]\n\t\t]);\n\t}\n\n\tconstructor(options){\n\t\tsuper(options);\n\n\t\tconst delaySize = 5000;\n\t\t// initialize delaytime for sliding\n\t\tthis.dlt = [];\n\t\t// initialize history values for lowpass & highpass filter\n\t\tthis.lpf = [];\n\t\tthis.hpf = [];\n\t\t// make a stereo delay\n\t\tthis.delays = [];\n\t\tfor (let i = 0; i < 2; i++){\n\t\t\tthis.delays[i] = this.makeDelay(delaySize);\n\t\t\tthis.lpf[i] = 0, this.hpf[i] = 0; //this.dlt[i] = 0;\n\t\t}\n\t}\n\n\tprocess(inputs, outputs, parameters){\n\t\tconst input = inputs[0];\n\t\tconst output = outputs[0];\n\n\t\tconst dt = [ parameters.timeL[0], parameters.timeR[0] ];\n\t\tconst fb = parameters.feedback[0];\n\t\tconst dm = Math.max(0, parameters.damping[0]);\n\t\tconst dw = parameters.drywet[0];\n\n\t\t// the slide time for delaytime changes in milliseconds\n\t\tconst sl = 1 - 1 / (25 * 44.1);\n\n\t\t// preprocessing of the input array, making sure there is a \n\t\t// signal to be processed by the delayline, otherwise the delay silences\n\t\t// when using if (input.length > 0)\n\t\tconst sig = [];\n\t\tif (input.length >= 2){\n\t\t\t// use right input on right side if stereo\n\t\t\tfor (let i = 0; i < BLOCKSIZE; i++){\n\t\t\t\tsig[i] = [ input[0][i], input[1][i] ];\n\t\t\t}\n\t\t} else if (input.length === 1){\n\t\t\t// if input is mono, duplicate to left/right inputs\n\t\t\tfor (let i = 0; i < BLOCKSIZE; i++){\n\t\t\t\tsig[i] = [ input[0][i], input[0][i] ];\n\t\t\t}\n\t\t} else {\n\t\t\t// if no input fill with 0's, processing needs to continue\n\t\t\tfor (let i = 0; i < BLOCKSIZE; i++){\n\t\t\t\tsig[i] = [ 0, 0 ];\n\t\t\t}\n\t\t}\n\t\t\n\t\t// process for every channel and every sample in the channel\n\t\tfor (let i = 0; i < BLOCKSIZE; i++){\n\t\t\t// process the Left and Right delay channels\n\t\t\tfor (let c = 0; c < this.delays.length; c++){\n\t\t\t\t// set initial value for delaytime based on parameter\n\t\t\t\tthis.dlt[c] = this.dlt[c] ?? dt[c];\n\t\t\t\t// set the delaytime with a smooth slide\n\t\t\t\tthis.dlt[c] = mix(dt[c], this.dlt[c], sl);\n\t\t\t\t// read from the delayline and apply a lowpass filter\n\t\t\t\tthis.lpf[c] = mix(this.lpf[c], this.lerpDelayAt(c, this.dlt[c]), dm);\n\t\t\t\t// apply tanh soft-clipping, allowing for positive feedback\n\t\t\t\tthis.lpf[c] = Math.tanh(this.lpf[c] * 0.5 * fb) * 2.0;\n\t\t\t\t// apply a highpass-filter for reducing DC/low-frequency build\n\t\t\t\tthis.hpf[c] = mix(this.lpf[c], this.hpf[c], 0.99857626);\n\t\t\t\tthis.lpf[c] = this.lpf[c] - this.hpf[c];\n\t\t\t}\n\t\t\t// write input to the delayline with prev * feedback\n\t\t\t// outside the for-loop because Left -> Right, and Right -> Left\n\t\t\tthis.writeDelay(1, sig[i][0] + this.lpf[0]);\n\t\t\tthis.writeDelay(0, sig[i][1] + this.lpf[1]);\n\t\t\t\n\t\t\tfor (let c = 0; c < this.delays.length; c++){\n\t\t\t\t// apply equalpower drywet and send output from the filter\n\t\t\t\toutput[c][i] = equalPowerMix(sig[i][c], this.lpf[c], dw);\n\t\t\t\t// update the read and write heads of the delaylines\n\t\t\t\tthis.updateReadWriteHeads(c);\n\t\t\t}\n\t\t}\n\t\treturn this.running;\n\t}\n}\nregisterProcessor('stereo-delay', StereoDelayProcessor);\n\n// Dattorro Reverberator\n// Thanks to port by khoin, taken from:\n// https://github.com/khoin/DattorroReverbNode\n// based on the paper from Jon Dattorro:\n// https://ccrma.stanford.edu/~dattorro/EffectDesignPart1.pdf\n// with small modifications to work in Mercury\n//\n// In jurisdictions that recognize copyright laws, this software is to\n// be released into the public domain.\n\n// THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND.\n// THE AUTHOR(S) SHALL NOT BE LIABLE FOR ANYTHING, ARISING FROM, OR IN\n// CONNECTION WITH THE SOFTWARE OR THE DISTRIBUTION OF THE SOFTWARE.\n// \nclass DattorroReverb extends ExtendedWorkletProcessor {\n\tstatic get parameterDescriptors() {\n\t\treturn formatDescriptors([\n\t\t\t[\"preDelay\", 0, 0, sampleRate - 1, \"k-rate\"],\n\t\t\t// [\"bandwidth\", 0.9999, 0, 1, \"k-rate\"],\t\n\t\t\t[\"inputDiffusion1\", 0.75, 0, 1, \"k-rate\"],\n\t\t\t[\"inputDiffusion2\", 0.625, 0, 1, \"k-rate\"],\n\t\t\t[\"decay\", 0.5, 0, 1, \"k-rate\"],\n\t\t\t[\"decayDiffusion1\", 0.7, 0, 0.999999, \"k-rate\"],\n\t\t\t[\"decayDiffusion2\", 0.5, 0, 0.999999, \"k-rate\"],\n\t\t\t[\"damping\", 0.005, 0, 1, \"k-rate\"],\n\t\t\t[\"excursionRate\", 0.5, 0, 2, \"k-rate\"],\n\t\t\t[\"excursionDepth\", 0.7, 0, 2, \"k-rate\"],\n\t\t\t[\"gain\", 0.7, 0, 2, \"k-rate\"],\n\t\t\t[\"drywet\", 0.5, 0, 1, \"k-rate\"]\n\t\t]);\n\t}\n\n\tconstructor(options) {\n\t\tsuper(options);\n\n\t\tthis._Delays = [];\n\t\t// Pre-delay is always one-second long, rounded to the nearest 128-chunk\n\t\tthis._pDLength = sampleRate + (128 - sampleRate % 128);\n\t\tthis._preDelay = new Float32Array(this._pDLength);\n\t\tthis._pDWrite = 0;\n\t\tthis._lp1 = 0.0;\n\t\tthis._lp2 = 0.0;\n\t\tthis._lp3 = 0.0;\n\t\tthis._excPhase = 0.0;\n\n\t\t[\n\t\t\t0.004771345, 0.003595309, 0.012734787, 0.009307483, // pre-tank\n\t\t\t0.022579886, 0.149625349, 0.060481839, 0.1249958, // left-loop\n\t\t\t0.030509727, 0.141695508, 0.089244313, 0.106280031 // right-loop\n\t\t].forEach(x => this.makeDelay(x));\n\n\t\tthis._taps = Int16Array.from([\n\t\t\t0.008937872, 0.099929438, 0.064278754, 0.067067639, \n\t\t\t0.066866033, 0.006283391, 0.035818689, // left-output\n\t\t\t0.011861161, 0.121870905, 0.041262054, 0.08981553, \n\t\t\t0.070931756, 0.011256342, 0.004065724 // right-output\n\t\t], x => Math.round(x * sampleRate));\n\t}\n\n\tmakeDelay(length) {\n\t\t// len, array, write, read, mask\n\t\tlet len = Math.round(length * sampleRate);\n\t\tlet nextPow2 = 2 ** Math.ceil(Math.log2((len)));\n\t\tthis._Delays.push([\n\t\t\tnew Float32Array(nextPow2), len - 1, 0 | 0, nextPow2 - 1\n\t\t]);\n\t}\n\n\twriteDelay(index, data) {\n\t\treturn this._Delays[index][0][this._Delays[index][1]] = data;\n\t}\n\n\treadDelay(index) {\n\t\treturn this._Delays[index][0][this._Delays[index][2]];\n\t}\n\n\treadDelayAt(index, i) {\n\t\tlet d = this._Delays[index];\n\t\treturn d[0][(d[2] + i) & d[3]];\n\t}\n\n\t// cubic interpolation\n\t// O. Niemitalo: \n\t// https://www.musicdsp.org/en/latest/Other/49-cubic-interpollation.html\n\treadDelayCAt(index, i) {\n\t\tlet d = this._Delays[index],\n\t\t\tfrac = i - ~~i,\n\t\t\tint = ~~i + d[2] - 1,\n\t\t\tmask = d[3];\n\n\t\tlet x0 = d[0][int++ & mask],\n\t\t\tx1 = d[0][int++ & mask],\n\t\t\tx2 = d[0][int++ & mask],\n\t\t\tx3 = d[0][int & mask];\n\n\t\tlet a = (3 * (x1 - x2) - x0 + x3) / 2,\n\t\t\tb = 2 * x2 + x0 - (5 * x1 + x3) / 2,\n\t\t\tc = (x2 - x0) / 2;\n\n\t\treturn (((a * frac) + b) * frac + c) * frac + x1;\n\t}\n\n\t// First input will be downmixed to mono if number of channels is not 2\n\t// Outputs Stereo.\n\tprocess(inputs, outputs, parameters) {\n\t\tconst pd = ~~parameters.preDelay[0],\n\t\t\t// bw = parameters.bandwidth[0], // replaced by using damping\n\t\t\tfi = parameters.inputDiffusion1[0],\n\t\t\tsi = parameters.inputDiffusion2[0],\n\t\t\tdc = parameters.decay[0],\n\t\t\tft = parameters.decayDiffusion1[0],\n\t\t\tst = parameters.decayDiffusion2[0],\n\t\t\tdp = 1 - parameters.damping[0],\n\t\t\tex = parameters.excursionRate[0] / sampleRate,\n\t\t\ted = parameters.excursionDepth[0] * sampleRate / 1000,\n\t\t\tgn = parameters.gain[0], //* 0.6, // lo & ro both mult. by 0.6 anyways\n\t\t\tdw = parameters.drywet[0];\n\n\t\t// write to predelay and dry output\n\t\tif (inputs[0].length == 2) {\n\t\t\tfor (let i = 127; i >= 0; i--) {\n\t\t\t\tthis._preDelay[this._pDWrite + i] = (inputs[0][0][i] + inputs[0][1][i]) * 0.5;\n\n\t\t\t\t// initially add the input to the output sound with dry amp\n\t\t\t\toutputs[0][0][i] = inputs[0][0][i] * (1-dw);\n\t\t\t\toutputs[0][1][i] = inputs[0][1][i] * (1-dw);\n\t\t\t}\n\t\t} else if (inputs[0].length > 0) {\n\t\t\tthis._preDelay.set(\n\t\t\t\tinputs[0][0],\n\t\t\t\tthis._pDWrite\n\t\t\t);\n\t\t\tfor (let i = 127; i >= 0; i--)\n\t\t\t\toutputs[0][0][i] = outputs[0][1][i] = inputs[0][0][i] * (1-dw);\n\t\t} else {\n\t\t\tthis._preDelay.set(\n\t\t\t\tnew Float32Array(128),\n\t\t\t\tthis._pDWrite\n\t\t\t);\n\t\t}\n\n\t\tlet i = 0 | 0;\n\t\twhile (i < 128) {\n\t\t\tlet lo = 0.0,\n\t\t\t\tro = 0.0;\n\n\t\t\t// input damping (formerly known as bandwidth bw, now uses dp)\n\t\t\tthis._lp1 += dp * (this._preDelay[(this._pDLength + this._pDWrite - pd + i) % this._pDLength] - this._lp1);\n\n\t\t\t// pre-tank\n\t\t\tlet pre = this.writeDelay(0, this._lp1 - fi * this.readDelay(0));\n\t\t\tpre = this.writeDelay(1, fi * (pre - this.readDelay(1)) + this.readDelay(0));\n\t\t\tpre = this.writeDelay(2, fi * pre + this.readDelay(1) - si * this.readDelay(2));\n\t\t\tpre = this.writeDelay(3, si * (pre - this.readDelay(3)) + this.readDelay(2));\n\n\t\t\tlet split = si * pre + this.readDelay(3);\n\n\t\t\t// excursions\n\t\t\t// could be optimized?\n\t\t\tlet exc = ed * (1 + Math.cos(this._excPhase * 6.2800));\n\t\t\tlet exc2 = ed * (1 + Math.sin(this._excPhase * 6.2847));\n\n\t\t\t// left loop\n\t\t\t// tank diffuse 1\n\t\t\tlet temp = this.writeDelay(4, split + dc * this.readDelay(11) + ft * this.readDelayCAt(4, exc));\n\t\t\t// long delay 1\n\t\t\tthis.writeDelay(5, this.readDelayCAt(4, exc) - ft * temp);\n\t\t\t// damp 1\n\t\t\tthis._lp2 += dp * (this.readDelay(5) - this._lp2);\n\t\t\ttemp = this.writeDelay(6, dc * this._lp2 - st * this.readDelay(6)); // tank diffuse 2\n\t\t\t// long delay 2\n\t\t\tthis.writeDelay(7, this.readDelay(6) + st * temp);\n\n\t\t\t// right loop \n\t\t\t// tank diffuse 3\n\t\t\ttemp = this.writeDelay(8, split + dc * this.readDelay(7) + ft * this.readDelayCAt(8, exc2));\n\t\t\t// long delay 3\n\t\t\tthis.writeDelay(9, this.readDelayCAt(8, exc2) - ft * temp);\n\t\t\t// damp 2\n\t\t\tthis._lp3 += dp * (this.readDelay(9) - this._lp3);\n\t\t\t// tank diffuse 4\n\t\t\ttemp = this.writeDelay(10, dc * this._lp3 - st * this.readDelay(10));\n\t\t\t// long delay 4\n\t\t\tthis.writeDelay(11, this.readDelay(10) + st * temp);\n\n\t\t\tlo = this.readDelayAt(9, this._taps[0]) +\n\t\t\t\tthis.readDelayAt(9, this._taps[1]) -\n\t\t\t\tthis.readDelayAt(10, this._taps[2]) +\n\t\t\t\tthis.readDelayAt(11, this._taps[3]) -\n\t\t\t\tthis.readDelayAt(5, this._taps[4]) -\n\t\t\t\tthis.readDelayAt(6, this._taps[5]) -\n\t\t\t\tthis.readDelayAt(7, this._taps[6]);\n\n\t\t\tro = this.readDelayAt(5, this._taps[7]) +\n\t\t\t\tthis.readDelayAt(5, this._taps[8]) -\n\t\t\t\tthis.readDelayAt(6, this._taps[9]) +\n\t\t\t\tthis.readDelayAt(7, this._taps[10]) -\n\t\t\t\tthis.readDelayAt(9, this._taps[11]) -\n\t\t\t\tthis.readDelayAt(10, this._taps[12]) -\n\t\t\t\tthis.readDelayAt(11, this._taps[13]);\n\n\t\t\toutputs[0][0][i] += lo * gn * dw;\n\t\t\toutputs[0][1][i] += ro * gn * dw;\n\n\t\t\tthis._excPhase += ex;\n\n\t\t\ti++;\n\n\t\t\tfor (let j = 0, d = this._Delays[0]; j < this._Delays.length; d = this._Delays[++j]) {\n\t\t\t\td[1] = (d[1] + 1) & d[3];\n\t\t\t\td[2] = (d[2] + 1) & d[3];\n\t\t\t}\n\t\t}\n\n\t\t// Update preDelay index\n\t\tthis._pDWrite = (this._pDWrite + 128) % this._pDLength;\n\n\t\treturn this.running;\n\t}\n}\nregisterProcessor('dattorro-reverb', DattorroReverb);\n";
 Tone.getContext().addAudioWorkletModule(URL.createObjectURL(new Blob([ fxExtensions ], { type: 'text/javascript' })));
 
 // Mercury main class controls Tone and loads samples

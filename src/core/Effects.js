@@ -99,10 +99,10 @@ const fxMap = {
 		return new AutoSVF(params);
 	},
 	'delay' : (params) => {
-		return new Delay(params);
+		return new WorkletDelay(params);
 	},
 	'echo' : (params) => {
-		return new Delay(params);
+		return new WorkletDelay(params);
 	},
 	// 'ppDelay' : (params) => {
 	// 	return new PingPongDelay(params);
@@ -111,10 +111,10 @@ const fxMap = {
 	// 	return new FreeVerb(params);
 	// },
 	'chorus' : (params) => {
-		return new Chorus(Util.mapDefaults(params, ['4/1', 45, 0.5]));
+		return new Chorus(mapDefaults(params, ['4/1', 45, 0.5]));
 	},
 	'double' : (params) => {
-		return new Chorus(Util.mapDefaults(params, ['8/1', 8, 1]));
+		return new Chorus(mapDefaults(params, ['8/1', 8, 1]));
 	},
 	'vowel' : (params) => {
 		return new FormantFilter(params);

@@ -7,6 +7,7 @@ class Sequencer {
 	constructor(engine, canvas){
 		// The Tone engine
 		this._engine = engine;
+		// The Hydra canvas
 		this._canvas = canvas;
 		
 		// Sequencer specific parameters
