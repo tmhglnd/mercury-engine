@@ -17051,7 +17051,9 @@ class MonoNoise extends Instrument {
 		this.source.connect(this.channelStrip());
 
 		// empty method to get rid of stop error
-		this.source.stop = () => {};
+		this.source.stop = () => {
+			this.source.workletNode.port.postMessage('dispose');
+		};
 
 		// a pink noise source based on a buffer noise 
 		// to reduce complex calculation
