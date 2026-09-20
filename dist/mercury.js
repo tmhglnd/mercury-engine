@@ -19098,7 +19098,7 @@ class Mercury extends MercuryInterpreter {
 		// effects on main output for Tone
 		this.gain = new Tone.Gain(1);
 		this.lowPassF = new Tone.Filter(18000, 'lowpass');
-		this.highPassF = new Tone.Filter(5, 'highpass');
+		this.highPassF = new Tone.Filter(20, 'highpass');
 		Tone.Destination.chain(this.lowPassF, this.highPassF, this.gain);
 
 		// an RMS meter for reactive visuals
@@ -19136,30 +19136,27 @@ class Mercury extends MercuryInterpreter {
 
 		// WebMIDI Setup if supported by the browser
 		// Else `midi` not supported in the Mercury code
-		WebMidi.enable((error) => {
-			if (error) {
-				console.error(`WebMIDI not enabled: ${error}`);
-			} else {
+		if ("requestMIDIAccess" in navigator){
+			WebMidi.enable({ sysex: true })
+			.then(() => {
 				this.midi.enabled = true;
-
-				console.log(`WebMIDI enabled`);
+	
+				log(`WebMIDI enabled`);
 				if (WebMidi.inputs.length < 1){
-					console.log(`No MIDI device detected`);
+					log(`No MIDI device detected`);
 				} else {
 					this.midi.inputs = WebMidi.inputs;
 					this.midi.outputs = WebMidi.outputs;
 					
-					WebMidi.inputs.forEach((device, index) => {
-						console.log(`in ${index}: ${device.name}`);
-					});
-					WebMidi.outputs.forEach((device, index) => {
-						console.log(`out ${index}: ${device.name}`);
-					});
+					this.logMidiDevices();
 				}
 				// execute a callback when midi is loaded if provided
-				if (onmidi) { onmidi(); }
-			}
-		});
+				if (onmidi) { onmidi(); } 
+			})
+			.catch((error) => {
+				console.error(`WebMIDI not enabled: ${error}`);
+			});
+		}
 	}
 
 	// resume webaudio and transport
@@ -19191,6 +19188,27 @@ class Mercury extends MercuryInterpreter {
 			console.error('Error stopping Transport');
 			return false;
 		}
+	}
+
+	// print the MIDI input and output devices to the console
+	logMidiDevices(){
+		log(`MIDI input/output devices:`);
+		this.midi.inputs.forEach((device, index) => {
+			log(`  - midi input ${index}: ${device.name}`);
+		});
+		this.midi.outputs.forEach((device, index) => {
+			log(`  - midi output ${index}: ${device.name}`);
+		});
+	}
+
+	// return the MIDI input devices
+	getMidiInputs(){
+		return this.midi.inputs;
+	}
+
+	// return the MIDI output devices
+	getMidiOutputs(){
+		return this.midi.outputs;
 	}
 
 	// set the bpm and optionally ramp in milliseconds

@@ -19,6 +19,7 @@
 	<!-- 2 buttons in the html page -->
 	<button id="b1">start</button>
 	<button id="b2">silence</button>
+	<button id="b3">record</button>
 
 	<p id="engine-status" style="font-family: 'arial';"></p>
 
@@ -41,23 +42,17 @@
 		Engine.setVolume(0.7);
 		// generate a random BPM
 		Engine.randomBPM();
-		// set the crossfade from previous and new evaluated code to 250 ms
-		Engine.setCrossFade(1000);
-
-		// display the engine settings in the html
-		let t = document.getElementById('engine-status');
-
-		t.innerHTML += `BPM: ${Engine.bpm}<br>`;
-		t.innerHTML += `Volume: ${Engine.volume}<br>`;
-		t.innerHTML += `CrossFade: ${Engine.crossFade}<br>`;
-		t.innerHTML += `LowPass: ${Engine.lowPass}<br>`;
-		t.innerHTML += `HighPass: ${Engine.highPass}<br>`;
+		// set the fadeOut time from previous to new evaluated code
+		Engine.setFadeOut(1000);
 
 		// Some mercury code initially created
 		const mercuryCode = `
-			set tempo 110
-			set randomSeed 4831
+			set randomSeed 0
+			set tempo random(1 95 125) 2/1
+			set lowPass random(1 2000 18000)
 			set scale dorian d
+			set highPass 20
+			set randomSeed 4831
 
 			list progression chordsFromNumerals([I7 IIIm7 IV7 V7])
 			print progression
@@ -79,11 +74,32 @@
 			let tree = Engine.code(mercuryCode);
 			console.log(tree);
 			// console.log(tree.errors);
+			// display the engine settings in the html
+			let t = document.getElementById('engine-status');
+			t.innerHTML = '';
+			t.innerHTML += `tempo: ${Engine.bpm}<br>`;
+			t.innerHTML += `volume: ${Engine.volume}<br>`;
+			t.innerHTML += `fadeOut: ${Engine.crossFade}<br>`;
+			t.innerHTML += `lowPass: ${Engine.lowPass}<br>`;
+			t.innerHTML += `highPass: ${Engine.highPass}<br>`;
 		}
 
 		// stop the code on the click of a button
 		let b2 = document.getElementById('b2');
 		b2.onclick = () => Engine.silence();
+
+		// a button for starting and stopping a recording
+		let b3 = document.getElementById('b3');
+		b3.onclick = () => {
+			let isRecording = Engine.isRecording() === 'started';
+			if (!isRecording){
+				Engine.record(true);
+				b3.innerHTML = 'stop recording';
+			} else {
+				Engine.record(false);
+				b3.innerHTML = 'start recording';
+			}
+		}
 	</script>
 </body>
 
