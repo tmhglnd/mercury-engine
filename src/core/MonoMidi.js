@@ -1,5 +1,5 @@
 const Tone = require('tone');
-const Util = require('./Util.js');
+const { getParam, divToS, log, lookup, toArray, toMidi } = require('./Util.js');
 const Sequencer = require('./Sequencer.js');
 const { WebMidi } = require("webmidi");
 
@@ -12,7 +12,7 @@ class MonoMidi extends Sequencer {
 		if (d === 'default'){
 			this._device = WebMidi.outputs[0];
 		} else if (!this._device){
-			Util.log(`${d} is not a valid MIDI Device name, set to default`);
+			log(`${d} is not a valid MIDI Device name, set to default`);
 			this._device = WebMidi.outputs[0];
 		}
 
@@ -33,13 +33,13 @@ class MonoMidi extends Sequencer {
 
 	event(c, time){
 		// normalized velocity (0 - 1)
-		let g = Util.getParam(this._velocity[0], c);
+		let g = getParam(this._velocity[0], c);
 				
 		// get the duration (minus 5ms to ensure note-off send before note-on)
-		let d = Util.divToS(Util.getParam(this._dur, c), this.bpm()) * 1000 - 5;
+		let d = divToS(getParam(this._dur, c), this.bpm()) * 1000 - 5;
 
 		// get the channel
-		let ch = Util.getParam(this._channel, c);
+		let ch = getParam(this._channel, c);
 
 		// timing offset to sync WebMidi and WebAudio
 		let offset = WebMidi.time - Tone.context.currentTime * 1000;
@@ -47,7 +47,7 @@ class MonoMidi extends Sequencer {
 
 		// send program change messages on specified channel
 		// only if the value is an integer
-		let pc = Util.getParam(this._program, c);
+		let pc = getParam(this._program, c);
 		if (!isNaN(pc) && this._pgm !== pc){
 			this._device.sendProgramChange(pc, ch, { time: sync - 1 });
 			// only send value if different from previous one
@@ -56,7 +56,7 @@ class MonoMidi extends Sequencer {
 
 		// send pitchbend message in hires -1 1 at specified channel
 		if (this._bend.length > 0){
-			let b = Util.lookup(this._bend, c);
+			let b = lookup(this._bend, c);
 			// clip the bend range between -1 and 1 (results in hires 14bit)
 			b = Math.min(1.0, Math.max(-1, b));
 			this._device.sendPitchBend(b, ch, { time: sync });
@@ -65,7 +65,7 @@ class MonoMidi extends Sequencer {
 		// send control changes!
 		this._cc.forEach((cc) => {
 			let ctrl = Number(cc[0]);
-			let val = Util.getParam(cc[1], c);
+			let val = getParam(cc[1], c);
 			val = Math.max(0, Math.min(127, val));
 
 			this._device.sendControlChange(ctrl, val, ch, { time: sync });
@@ -78,25 +78,25 @@ class MonoMidi extends Sequencer {
 
 		// if a midinote is selected instead of note
 		// play the value without mapping
-		let m = Util.getParam(this._midinote, c);
+		let m = getParam(this._midinote, c);
 		if (m){
 			if (this._chord){
-				m = Util.lookup(this._midinote, c);
-				m = Util.toArray(m);
+				m = lookup(this._midinote, c);
+				m = toArray(m);
 			}
 			this._device.playNote(m, ch, noteOptions);
 			return;
 		}
 
 		// note as interval / octave coordinate
-		let o = Util.getParam(this._note[1], c);
+		let o = getParam(this._note[1], c);
 		let n = [];
 		let i = [];
 		if (this._chord){
-			i = Util.lookup(this._note[0], c);
-			i = Util.toArray(i);
+			i = lookup(this._note[0], c);
+			i = toArray(i);
 		} else {
-			i = [ Util.getParam(this._note[0], c) ];
+			i = [ getParam(this._note[0], c) ];
 		}
 
 		// if the note is 'off' don't play the note
@@ -106,7 +106,7 @@ class MonoMidi extends Sequencer {
 		for (let x=0; x<i.length; x++){
 			// reconstruct midi note value, (0, 0) = 36
 			// convert to scale and include the octave
-			n[x] = Util.toMidi(i[x], o);
+			n[x] = toMidi(i[x], o);
 		}
 		// play the note(s)! updated for webmidi 3.x
 		this._device.playNote(n, ch, noteOptions);
@@ -114,8 +114,8 @@ class MonoMidi extends Sequencer {
 
 	amp(g, r){
 		// set the gain and ramp time
-		g = Util.toArray(g);
-		r = (r !== undefined)? Util.toArray(r) : [ 0 ];
+		g = toArray(g);
+		r = (r !== undefined)? toArray(r) : [ 0 ];
 		// convert amplitude to velocity range
 		this._velocity[0] = g.map(g => Math.min(1, Math.max(0, g*g)));
 		// this._velocity[0] = g.map(g => Math.floor(Math.min(127, Math.max(0, g * 127))));
@@ -123,19 +123,19 @@ class MonoMidi extends Sequencer {
 	}
 
 	env(d){
-		this._dur = Util.toArray(d);
+		this._dur = toArray(d);
 	}
 
 	out(c){
-		this._channel = Util.toArray(c);
+		this._channel = toArray(c);
 	}
 
 	bend(b=[0]){
-		this._bend = Util.toArray(b);
+		this._bend = toArray(b);
 	}
 
 	midinote(n=[60]){
-		this._midinote = Util.toArray(n);
+		this._midinote = toArray(n);
 	}
 
 	chord(c){
@@ -146,7 +146,7 @@ class MonoMidi extends Sequencer {
 	}
 
 	program(p){
-		this._program = Util.toArray(p);
+		this._program = toArray(p);
 	}
 
 	add_fx(...cc){
@@ -154,11 +154,11 @@ class MonoMidi extends Sequencer {
 		this._cc = [];
 		cc.forEach((c) => {
 			if (isNaN(c[0])){
-				Util.log(`'${c[0]}' is not a valid CC number`);
+				log(`'${c[0]}' is not a valid CC number`);
 			} else {
 				let cc = [];
 				cc[0] = c[0];
-				cc[1] = Util.toArray(c[1]);
+				cc[1] = toArray(c[1]);
 				this._cc.push(cc);
 			}
 		});
