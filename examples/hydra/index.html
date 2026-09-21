@@ -38,16 +38,17 @@
 		osc(10, 0.2, () => amp * 20).hue(() => amp * 5).out();
 
 		// Initialize a Mercury engine
-		const Engine = new Mercury();
+		const Engine = new Mercury({ onload: () => {
+			console.log('Mercury engine loaded! 🚀 🌕');
+			// Create the meter and set an interval to update the value for
+			// the visuals. 16ms is chosen because of 1000ms/60fps = 16.667
+			Engine.addMeter();
+			setInterval(() => {
+				amp = Engine.getMeter();
+				consoleMeter(amp);
+			}, 16);
+		}});
 		
-		// Create the meter and set an interval to update the value for
-		// the visuals. 16ms is chosen because of 1000ms/60fps = 16.667
-		Engine.addMeter();
-		setInterval(() => {
-			amp = Engine.getMeter();
-			consoleMeter(amp);
-		}, 16);
-
 		// Some mercury code initially created
 		const mercuryCode = `
 			set tempo 100

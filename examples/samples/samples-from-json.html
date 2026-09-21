@@ -42,11 +42,12 @@
 		}
 
 		// Initialize a Mercury engine
-		const Engine = new Mercury();
-		// Load extra buffers
-		console.log('The engine is loaded!');
-		console.log('Buffers are empty:', Engine.getBuffers());
-		loadExtraSounds(Engine);
+		const Engine = new Mercury({ onload: () => {
+			// Load extra buffers
+			console.log('Mercury engine loaded! 🚀 🌕');
+			console.log('Buffers are empty:', Engine.getBuffers());
+			loadExtraSounds(Engine);
+		}});
 
 		// print things to the html
 		window.addEventListener('mercuryLog', (e) => {

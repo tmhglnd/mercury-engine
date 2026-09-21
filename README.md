@@ -78,18 +78,17 @@ Include the package
 const { Mercury } = require('mercury-engine');
 ```
 
-Initialize the engine and include a callback function through { onload: }, this will be executed when loading is completed.
+Initialize the engine and include a callback function through { onload: }, this will be executed when loading of `WebMIDI` and `AudioWorkletModules` is completed.
 
 ```js
 const Engine = new Mercury({
-	onload: (e) => {
+	onload: () => {
 		console.log('This callback is called when loading is completed!');
-		console.log('The engine:', e);
 	}
 });
 ```
 
-:::important
+:::info
 Samples are not loaded anymore at initialization to speed up loading times
 :::
 
@@ -230,11 +229,11 @@ osc(10, 0.2, () => amp * 20).out();
 
 ### MIDI
 
-WebMIDI is included and started if the browser is compatible with it. If not, an error will be printed to the console. You can provide a callback function `onmidi` to execute some code when the WebMIDI enabling was succesful.
+WebMIDI is included and started if the browser is compatible with it. If not, an error will be printed to the console. You can provide a callback function `onload` to execute some code when the WebMIDI enabling was succesful.
 
 ```js
 const Engine = Mercury({
-	onmidi: () => {
+	onload: () => {
 		console.log('The WebMIDI status is:', Engine.midi.status);
 		console.log('With inputs:', Engine.midi.inputs);
 		console.log('And outputs:', Engine.midi.outputs);

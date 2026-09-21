@@ -33,7 +33,7 @@
 
 		// Initialize a Mercury engine with callback function when midi loaded
 		const Engine = new Mercury({
-			onmidi: () => {
+			onload: () => {
 				// display the midi status, inputs and outputs in the html
 				let t = document.getElementById('midi-status');
 				t.innerHTML += `MIDI is enabled: ${Engine.midi.enabled}<br>`;
@@ -44,6 +44,7 @@
 				Engine.midi.outputs.forEach((d, i) => {
 					t.innerHTML += `<br>out ${i}: ${d.name}`;
 				});
+				console.log('Mercury engine and MIDI are loaded! 🚀 🌕')
 			}
 		});
 

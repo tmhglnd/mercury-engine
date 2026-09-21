@@ -18,7 +18,7 @@ const MonoFM = require('./core/MonoFM.js');
 class MercuryInterpreter {
 	constructor({ hydra, p5canvas } = {}){
 		// cross-fade time
-		this.crossFade;
+		this.fadeOut;
 		
 		// arrays with the current and previous instruments for crossfade
 		this._sounds = [];
@@ -91,15 +91,15 @@ class MercuryInterpreter {
 
 	setCrossFade(f){
 		// set the crossFade time in milliseconds
-		this.crossFade = divToS(f, this.getBPM());
-		// this.crossFade = Number(f) / 1000;
-		log(`crossFade is deprecated, setting fadeOut time to ${this.crossFade}ms`);
+		this.fadeOut = divToS(f, this.getBPM());
+		// this.fadeOut = Number(f) / 1000;
+		// log(`crossFade is deprecated, using fadeOut instead, set to: ${this.fadeOut}ms`);
 	}
 
 	setFadeOut(f){
 		// set the fadeOut time in milliseconds
-		this.crossFade = divToS(f, this.getBPM());
-		log(`setting fadeOut time to ${this.crossFade}`);
+		this.fadeOut = divToS(f, this.getBPM());
+		// log(`setting fadeOut time to ${this.fadeOut}`);
 	}
 
 	getCode(){
@@ -336,7 +336,7 @@ class MercuryInterpreter {
 		// if (!this.sounds.length){
 		// 	this.startSounds(this.sounds);
 		// }
-		this.removeSounds(this._sounds, this.crossFade);
+		this.removeSounds(this._sounds, this.fadeOut);
 		this.startSounds(this.sounds);
 
 		this.resume();

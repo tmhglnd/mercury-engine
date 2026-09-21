@@ -17,7 +17,6 @@ const { WebMidi } = require("webmidi");
 // transformed to inline with browserify brfs
 const fs = require('fs');
 const fxExtensions = fs.readFileSync('./src/core/effects/Processors.js', 'utf-8');
-Tone.getContext().addAudioWorkletModule(URL.createObjectURL(new Blob([ fxExtensions ], { type: 'text/javascript' })));
 
 // Mercury main class controls Tone and loads samples
 // also has the interpreter evaluating the code and adding the instruments
@@ -53,7 +52,6 @@ class Mercury extends MercuryInterpreter {
 		// create a Tone Recording and connect to the final output Node
 		// skip when Running in the Safari browser
 		this.isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-		console.log('Is running safari?', this.isSafari);
 
 		this.recorder = this.isSafari ? null : new Tone.Recorder({ mimeType: 'audio/webm' });
 		if (this.recorder){
@@ -65,7 +63,7 @@ class Mercury extends MercuryInterpreter {
 		this.setVolume(1);
 		this.setHighPass(18000);
 		this.setLowPass(5);
-		this.setCrossFade(250);
+		this.setFadeOut(250);
 
 		// get the base url and add to the sample locations
 		this.baseUrl = this.defaultSamples['_base'];
@@ -80,11 +78,12 @@ class Mercury extends MercuryInterpreter {
 		// the midi status, inputs and outputs
 		this.midi = { enabled: false, inputs: [], outputs: [] };
 
+		let midiPromise;
 		// WebMIDI Setup if supported by the browser
 		// Else `midi` not supported in the Mercury code
 		if ("requestMIDIAccess" in navigator){
-			WebMidi.enable({ sysex: true })
-			.then(() => {
+			midiPromise = WebMidi.enable({ sysex: true })
+			midiPromise.then(() => {
 				this.midi.enabled = true;
 	
 				log(`WebMIDI enabled`);
@@ -96,18 +95,26 @@ class Mercury extends MercuryInterpreter {
 					
 					this.logMidiDevices();
 				}
-				// execute a callback when midi is loaded if provided
-				if (onmidi) { onmidi(); } 
 			})
 			.catch((error) => {
 				console.error(`WebMIDI not enabled: ${error}`);
 			});
 		}
-		// evaluate the onload callback
-		if (onload) { 
-			console.log('onload is deprecated');
-			onload(this);
-		}
+
+		// loading the audioworkletmodules is async and therefore onload is used
+		const workletPromise = Tone.getContext().addAudioWorkletModule(URL.createObjectURL(new Blob([ fxExtensions ], { type: 'text/javascript' })));
+		workletPromise.then(() => {
+			log(`AudioWorkletModules added`);
+		})
+		.catch((error) => {
+			console.error(`Error adding AudioWorkletModules: ${error}`);
+		});
+
+		// fire this event when Midi and Workletmodules are loaded 
+		// and promises resolved
+		Promise.all([midiPromise, workletPromise]).then(() => {
+			if (onload) { onload(); }
+		});
 	}
 
 	// resume webaudio and transport
