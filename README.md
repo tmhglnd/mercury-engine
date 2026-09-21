@@ -88,11 +88,8 @@ const Engine = new Mercury({
 });
 ```
 
-:::info
-Samples are not loaded anymore at initialization to speed up loading times
-:::
-
-A quick one-liner
+> [!IMPORTANT]
+> Samples are not loaded anymore at initialization to speed up loading times
 
 ### Resume, evaluate and silence
 
